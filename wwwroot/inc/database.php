@@ -1704,7 +1704,7 @@ function commitUpdatePort ($object_id, $port_id, $port_name, $port_type_id, $por
 			throw new InvalidRequestArgException ('port_l2address', $db_l2address, 'address belongs to another object');
 		}
 		$prev_comment = getPortReservationComment ($port_id);
-		$reservation_comment = mb_strlen ($port_reservation_comment) ? $port_reservation_comment : NULL;
+		$reservation_comment = nullEmptyStr ($port_reservation_comment);
 		usePreparedUpdateBlade
 		(
 			'Port',
@@ -1824,7 +1824,7 @@ function commitUpdatePortLink ($link_id, $cable = NULL)
 	return usePreparedExecuteBlade
 	(
 		'UPDATE Link SET cable = ? WHERE id = ?',
-		array (mb_strlen ($cable) ? $cable : NULL, $link_id)
+		array (nullEmptyStr ($cable), $link_id)
 	);
 }
 
