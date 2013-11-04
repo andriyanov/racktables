@@ -280,6 +280,8 @@ function genericAssertion ($argname, $argtype)
 		return assertStringArg ($argname);
 	case 'string0':
 		return assertStringArg ($argname, TRUE);
+	case 'stringN':
+		return nullEmptyStr (assertStringArg ($argname, TRUE));
 	case 'uint':
 		return assertUIntArg ($argname);
 	case 'uint-uint':
