@@ -5392,4 +5392,10 @@ function isTransactionActive()
 	}
 }
 
+function getObjectPortCount ($object_id)
+{
+	$result = usePreparedSelectBlade ("SELECT COUNT(*) FROM Port WHERE object_id = ?", array ($object_id));
+	return $result->fetch (PDO::FETCH_COLUMN, 0);
+}
+
 ?>
