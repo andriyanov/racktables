@@ -2558,12 +2558,13 @@ $msgcode['addOIFCompatPack']['OK'] = 21;
 function addOIFCompatPack ()
 {
 	genericAssertion ('standard', 'enum/wdmstd');
-	global $wdm_packs;
+	global $wdm_packs, $dbxlink;
 	$oifs = $wdm_packs[$_REQUEST['standard']]['oif_ids'];
+	$dbxlink->beginTransaction();
 	foreach ($oifs as $oif_id_1)
 	{
 		$args = $qmarks = array();
-		$query = 'REPLACE INTO PortCompat (type1, type2) VALUES ';
+		$query = 'INSERT IGNORE INTO PortCompat (type1, type2) VALUES ';
 		foreach ($oifs as $oif_id_2)
 		{
 			$qmarks[] = '(?, ?)';
@@ -2573,6 +2574,7 @@ function addOIFCompatPack ()
 		$query .= implode (', ', $qmarks);
 		usePreparedExecuteBlade ($query, $args);
 	}
+	$dbxlink->commit();
 	return showFuncMessage (__FUNCTION__, 'OK');
 }
 
@@ -2580,12 +2582,14 @@ $msgcode['delOIFCompatPack']['OK'] = 21;
 function delOIFCompatPack ()
 {
 	genericAssertion ('standard', 'enum/wdmstd');
-	global $wdm_packs;
+	global $wdm_packs, $dbxlink;
 	$oifs = $wdm_packs[$_REQUEST['standard']]['oif_ids'];
+	$dbxlink->beginTransaction();
 	foreach ($oifs as $oif_id_1)
 		foreach ($oifs as $oif_id_2)
 			if ($oif_id_1 != $oif_id_2) # leave narrow-band mapping intact
 				usePreparedDeleteBlade ('PortCompat', array ('type1' => $oif_id_1, 'type2' => $oif_id_2));
+	$dbxlink->commit();
 	return showFuncMessage (__FUNCTION__, 'OK');
 }
 
