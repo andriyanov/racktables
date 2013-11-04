@@ -264,8 +264,6 @@ function updateCableIdAJAX()
 	spreadContext (spotEntity ('object', $porta_info['object_id']));
 	spreadContext (spotEntity ('object', $portb_info['object_id']));
 	assertPermission ('object', 'ports', 'editPort');
-	if (! $link_info['porta'])
-		throw new RackTablesError ('Cant update cable ID: port is not linked');
 	commitUpdatePortLink ($sic['id'], $sic['text']);
 	echo 'OK';
 }

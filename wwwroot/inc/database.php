@@ -4790,14 +4790,17 @@ function getPortInfo ($port_id)
 {
 	$result = fetchPortList ('Port.id = ?', array ($port_id));
 	if (empty ($result))
-		return NULL;
+		throw new EntityNotFoundException ('port', $port_id);
 	return array_first ($result);
 }
 
 function getPortLinkInfo ($link_id)
 {
-	$result = usePreparedSelectBlade ('SELECT porta, portb, cable FROM Link WHERE id = ?', array ($link_id));
-	return $result->fetch (PDO::FETCH_ASSOC);
+	$result = usePreparedSelectBlade ('SELECT id, porta, portb, cable FROM Link WHERE id = ?', array ($link_id));
+	$row = $result->fetch (PDO::FETCH_ASSOC);
+	if (! $row)
+		throw new EntityNotFoundException ('link', $link_id);
+	return $row;
 }
 
 function getVLANDomainStats ()
