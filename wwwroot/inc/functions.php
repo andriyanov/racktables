@@ -371,7 +371,7 @@ function genericAssertion ($argname, $argtype)
 			throw new InvalidRequestArgException ($argname, $sic[$argname], 'Unknown value');
 		return $sic[$argname];
 	case 'iif':
-		assertUIntArg ($argname);
+		assertUIntArg ($argname, TRUE);
 		if (!array_key_exists ($sic[$argname], getPortIIFOptions()))
 			throw new InvalidRequestArgException ($argname, $sic[$argname], 'Unknown value');
 		return $sic[$argname];
@@ -3139,7 +3139,7 @@ function getPortListPrefs()
 	foreach (explode (';', getConfigVar ('DEFAULT_PORT_OIF_IDS')) as $tmp)
 	{
 		$tmp = explode ('=', trim ($tmp));
-		if (count ($tmp) == 2 and $tmp[0] > 0 and $tmp[1] > 0)
+		if (count ($tmp) == 2 and $tmp[0] >= 0 and $tmp[1] > 0)
 			$ret['oif_picks'][$tmp[0]] = $tmp[1];
 	}
 	// enforce default value

@@ -2159,6 +2159,10 @@ $dictionary = array
 
 	// add new records here until the gap is filled
 
+	2076 => array ('chapter_id' => 2, 'dict_value' => '8P8C (RJ45)'),
+	2077 => array ('chapter_id' => 2, 'dict_value' => 'fiber SC'),
+	2078 => array ('chapter_id' => 2, 'dict_value' => 'fiber LC'),
+	2079 => array ('chapter_id' => 2, 'dict_value' => 'fiber FC'),
 	2080 => array ('chapter_id' => 14, 'dict_value' => 'Huawei VRP 5.11'),
 	2081 => array ('chapter_id' => 14, 'dict_value' => 'Huawei VRP 5.12'),
 	2082 => array ('chapter_id' => 14, 'dict_value' => 'Cisco IOS 15.1'),

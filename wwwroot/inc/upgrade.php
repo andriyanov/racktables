@@ -1865,8 +1865,25 @@ BEGIN
 END;
 ";
 
+			// create new 'cross' iif and it's connector types
+			$query[] = "INSERT INTO `PortInnerInterface` VALUES (0, 'cross')";
+			$query[] = "INSERT INTO `PortInterfaceCompat` VALUES (0,2076),(0,2077),(0,2078),(0,2079)";
+
+			// create new PortCompat pairs
+			$copper_oifs = array (2076, 18, 1424, 24, 1087, 1316, 1603, 19, 1604, 1078, 1208, 1077, 682, 681, 29, 1642);
+			$fiber_oifs = array (2077, 2078, 2079, 1206, 1207, 1204, 1205, 1202, 1203, 34, 1198, 1199, 1200, 1195, 1197, 1196, 1201, 1671, 1670, 1669, 35, 36, 37, 39, 30, 38, 1664, 1663, 1668, 1078, 1588, 1084, 1208, 1077, 1080, 1079, 1082, 1081);
+			$pairs = array();
+			foreach (array (2076) as $cross_oif)
+				foreach ($copper_oifs as $oif)
+					$pairs[] = "($cross_oif,$oif)";
+			foreach (array (2077, 2078, 2079) as $cross_oif)
+				foreach ($fiber_oifs as $oif)
+					$pairs[] = "($cross_oif,$oif)";
+			$query[] = "INSERT IGNORE INTO PortCompat VALUES " . implode (',', $pairs);
 			// make PortCompat symmetric (insert missing reversed-order pairs)
 			$query[] = "INSERT INTO PortCompat SELECT pc1.type2, pc1.type1 FROM PortCompat pc1 LEFT JOIN PortCompat pc2 ON pc1.type1 = pc2.type2 AND pc1.type2 = pc2.type1 WHERE pc2.type1 IS NULL";
+
+			$query[] = "UPDATE `Config` SET varvalue = CONCAT('0=2076; ', varvalue) WHERE varname = 'DEFAULT_PORT_OIF_IDS'";
 
 			// one HW type was moved from the 'Network switch' chapter to the 'Network chassis' chapter
 			// change the type of affected objects to 'Network chassis'

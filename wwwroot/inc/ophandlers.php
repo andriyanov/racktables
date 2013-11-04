@@ -308,7 +308,7 @@ $opspec_list['portifcompat-edit-del'] = array
 	'action' => 'DELETE',
 	'arglist' => array
 	(
-		array ('url_argname' => 'iif_id', 'assertion' => 'uint'),
+		array ('url_argname' => 'iif_id', 'assertion' => 'iif'),
 		array ('url_argname' => 'oif_id', 'assertion' => 'uint'),
 	),
 );
@@ -1430,7 +1430,7 @@ function resetUIConfig()
 	setConfigVar ('TAGS_QUICKLIST_THRESHOLD','50');
 	setConfigVar ('ENABLE_MULTIPORT_FORM', 'no');
 	setConfigVar ('DEFAULT_PORT_IIF_ID', '1');
-	setConfigVar ('DEFAULT_PORT_OIF_IDS', '1=24; 3=1078; 4=1077; 5=1079; 6=1080; 8=1082; 9=1084; 10=1588; 11=1668');
+	setConfigVar ('DEFAULT_PORT_OIF_IDS', '0=2076; 1=24; 3=1078; 4=1077; 5=1079; 6=1080; 8=1082; 9=1084; 10=1588; 11=1668');
 	setConfigVar ('IPV4_TREE_RTR_AS_CELL', 'no');
 	setConfigVar ('PROXIMITY_RANGE', 0);
 	setConfigVar ('IPV4_TREE_SHOW_VLAN', 'yes');
@@ -2498,7 +2498,7 @@ function updateFileText ()
 $msgcode['addIIFOIFCompat']['OK'] = 48;
 function addIIFOIFCompat ()
 {
-	assertUIntArg ('iif_id');
+	genericAssertion ('iif_id', 'iif');
 	assertUIntArg ('oif_id');
 	commitSupplementPIC ($_REQUEST['iif_id'], $_REQUEST['oif_id']);
 	return showFuncMessage (__FUNCTION__, 'OK');
