@@ -103,15 +103,18 @@ should be sufficient:
 *******************************************************
 
 *** Upgrading to 0.20.6 ***
+Database triggers are used for some data consistency measures.  The database user
+account must have the 'TRIGGER' privilege, which was introduced in MySQL 5.1.7.
 
-Database triggers are used for some data consistency measures.  The database
-user account must have the 'TRIGGER' privilege, which was introduced in
-MySQL 5.1.7.
 This release converts PatchPanels' port types into the 8P8C(RJ45). There are many
 changes being performed to the database, so BACKUP THE DATABASE BEFORE UPGRADE, PLEASE.
 
 Cable paths can be traced and displayed in a graphical format. This requires
 the Image_GraphViz PEAR module (http://pear.php.net/package/Image_GraphViz).
+
+The DEFAULT_PORT_IIF_ID config var has changed its syntax. Now it accepts a list
+of port innerInterface IDs separated by semicolon. All the port types contained
+in these IIFs will be displayed in popup selectbox.
 
 Config variables TELNET_OBJS_LISTSRC, SSH_OBJS_LISTSRC, RDP_OBJS_LISTSRC were merged into new MGMT_PROTOS.
 The old ones were deleted from the DB. MGMT_PROTOS allows to specify any management protocol for a particular

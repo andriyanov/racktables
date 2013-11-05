@@ -1,11 +1,11 @@
 0.20.6
 	bugfix: "sshnokey" gateway had a bug
-	bugfix: SLB config was generated incrorrectly when multiple 
+	bugfix: SLB config was generated incrorrectly when multiple
 		rspools were linked with the same balancer-vsg pair
 	bugfix: change blade orientation of Cisco 6509-V-E (#985)
 	bugfix: default values of some LDAP options weren't being used
 	bugfix: update of Cisco WS-C4948 SNMPsync port definitions (#977) by Mark Wilkinson
-	update: display friendlier message when attempting to NAT non-existent IP (#963) 
+	update: display friendlier message when attempting to NAT non-existent IP (#963)
 	bugfix: jQuery.UI static files were not accessible (by Aleksandr Balezin)
 	bugfix: 404 response header for missing static files was incorrect (by Aleksandr Balezin)
 	bugfix: IOS CLI prompt detection (#1033)

@@ -763,19 +763,6 @@ function get_pseudo_file ($name)
   KEY `scanidx` (`presented_username`,`successful_hash`)
 ) ENGINE=InnoDB";
 
-		$query[] = "CREATE TABLE `Link` (
-  `id` int(10) unsigned NOT NULL auto_increment,
-  `porta` int(10) unsigned NOT NULL default '0',
-  `portb` int(10) unsigned NOT NULL default '0',
-  `cable` char(64) DEFAULT NULL,
-  PRIMARY KEY  (`id`),
-  UNIQUE KEY `porta-portb-unique` (`porta`,`portb`),
-  KEY `porta` (`porta`),
-  KEY `portb` (`portb`),
-  CONSTRAINT `Link-FK-a` FOREIGN KEY (`porta`) REFERENCES `Port` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `Link-FK-b` FOREIGN KEY (`portb`) REFERENCES `Port` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB";
-
 		$query[] = "CREATE TABLE `Molecule` (
   `id` int(10) unsigned NOT NULL auto_increment,
   PRIMARY KEY  (`id`)
@@ -847,8 +834,26 @@ function get_pseudo_file ($name)
   KEY `comment` (`reservation_comment`),
   KEY `l2address` (`l2address`),
   KEY `Port-FK-iif-oif` (`iif_id`,`type`),
+  KEY `Port-FK-id-oif` (`id`,`type`),
   CONSTRAINT `Port-FK-iif-oif` FOREIGN KEY (`iif_id`, `type`) REFERENCES `PortInterfaceCompat` (`iif_id`, `oif_id`),
   CONSTRAINT `Port-FK-object_id` FOREIGN KEY (`object_id`) REFERENCES `Object` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB";
+
+		$query[] = "CREATE TABLE `Link` (
+  `id` int(10) unsigned NOT NULL auto_increment,
+  `porta` int(10) unsigned NOT NULL default '0',
+  `porta_type` int(10) unsigned NOT NULL default '0',
+  `portb` int(10) unsigned NOT NULL default '0',
+  `portb_type` int(10) unsigned NOT NULL default '0',
+  `cable` char(64) default NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `porta-portb-unique` (`porta`,`portb`),
+  KEY `porta` (`porta`,`porta_type`) USING BTREE,
+  KEY `portb` (`portb`,`portb_type`) USING BTREE,
+  KEY `Link-FK-types` (`porta_type`,`portb_type`),
+  CONSTRAINT `Link-FK-types` FOREIGN KEY (`porta_type`, `portb_type`) REFERENCES `PortCompat` (`type1`, `type2`),
+  CONSTRAINT `Link-FK-porta` FOREIGN KEY (`porta`, `porta_type`) REFERENCES `Port` (`id`, `type`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `Link-FK-portb` FOREIGN KEY (`portb`, `portb_type`) REFERENCES `Port` (`id`, `type`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB";
 
 		$query[] = "CREATE TABLE `PortAllowedVLAN` (
@@ -1153,62 +1158,67 @@ function get_pseudo_file ($name)
   CONSTRAINT `VSEnabledPorts-FK-vs_id-proto-vport` FOREIGN KEY (`vs_id`, `proto`, `vport`) REFERENCES `VSPorts` (`vs_id`, `proto`, `vport`) ON DELETE CASCADE
 ) ENGINE=InnoDB";
 
-		$query[] = "CREATE TRIGGER `checkLinkBeforeInsert` BEFORE INSERT ON `Link`
-  FOR EACH ROW
+		$links_trigger_body = <<<ENDOFTRIGGER
 BEGIN
-  DECLARE tmp, porta_type, portb_type, count INTEGER;
-  IF NEW.porta = NEW.portb THEN
-    SET NEW.porta = NULL;
-  ELSEIF NEW.porta > NEW.portb THEN
-    SET tmp = NEW.porta;
-    SET NEW.porta = NEW.portb;
-    SET NEW.portb = tmp;
-  END IF; 
-  SELECT type INTO porta_type FROM Port WHERE id = NEW.porta;
-  SELECT type INTO portb_type FROM Port WHERE id = NEW.portb;
-  SELECT COUNT(*) INTO count FROM PortCompat WHERE (type1 = porta_type AND type2 = portb_type) OR (type1 = portb_type AND type2 = porta_type);
-  IF count = 0 THEN
-    SET NEW.porta = NULL;
-  END IF;
-END";
+	DECLARE tmp, porta_iif, porta_type, portb_iif, portb_type, count INTEGER;
+
+	IF NEW.porta = NEW.portb THEN
+		# forbid connecting a port to itself
+		SET NEW.porta = NULL;
+	ELSEIF NEW.porta > NEW.portb THEN
+		# force porta < portb
+		SET tmp = NEW.porta;
+		SET NEW.porta = NEW.portb;
+		SET NEW.portb = tmp;
+		SET tmp = NEW.porta_type;
+		SET NEW.porta_type = NEW.portb_type;
+		SET NEW.portb_type = tmp;
+	END IF;
+
+	# fetch iif_id's of ports, lock ports to prevent concurrent link establishing
+	SELECT iif_id, type INTO porta_iif, porta_type FROM Port WHERE id = NEW.porta FOR UPDATE;
+	SELECT iif_id, type INTO portb_iif, portb_type FROM Port WHERE id = NEW.portb FOR UPDATE;
+
+	# fill not specified default values of porta_type, portb_type
+	IF NEW.porta_type = 0 THEN
+		SET NEW.porta_type = porta_type;
+	END IF;
+	IF NEW.portb_type = 0 THEN
+		SET NEW.portb_type = portb_type;
+	END IF;
+
+	# if both ports are of L2 type, ensure they have no other L2 links
+	IF NEW.porta IS NOT NULL AND porta_iif <> 0 AND portb_iif <> 0 THEN
+		SELECT SUM(s.c) INTO count FROM (
+			SELECT count(*) as c
+				FROM Link l INNER JOIN Port p ON l.portb = p.id AND p.iif_id <> 0
+				WHERE l.porta = NEW.porta AND l.portb <> NEW.portb
+			UNION SELECT count(*) as c
+				FROM Link l INNER JOIN Port p ON l.portb = p.id AND p.iif_id <> 0
+				WHERE l.porta = NEW.portb AND l.portb <> NEW.porta
+			UNION SELECT count(*) as c
+				FROM Link l INNER JOIN Port p ON l.porta = p.id AND p.iif_id <> 0
+				WHERE l.portb = NEW.porta AND l.porta <> NEW.portb
+			UNION SELECT count(*) as c
+				FROM Link l INNER JOIN Port p ON l.porta = p.id AND p.iif_id <> 0
+				WHERE l.portb = NEW.portb AND l.porta <> NEW.porta
+		) s;
+		IF count <> 0 THEN
+			SET NEW.porta = NULL;
+		END IF;
+	END IF;
+END
+ENDOFTRIGGER;
+
+		$query[] = "CREATE TRIGGER `checkLinkBeforeInsert` BEFORE INSERT ON `Link`
+  FOR EACH ROW $links_trigger_body";
 
 		$query[] = "CREATE TRIGGER `checkLinkBeforeUpdate` BEFORE UPDATE ON `Link`
   FOR EACH ROW
 BEGIN
-  DECLARE tmp, porta_type, portb_type, count INTEGER;
-  IF NEW.porta = NEW.portb THEN
-    SET NEW.porta = NULL;
-  ELSEIF NEW.porta > NEW.portb THEN
-    SET tmp = NEW.porta;
-    SET NEW.porta = NEW.portb;
-    SET NEW.portb = tmp;
-  END IF; 
-  SELECT type INTO porta_type FROM Port WHERE id = NEW.porta;
-  SELECT type INTO portb_type FROM Port WHERE id = NEW.portb;
-  SELECT COUNT(*) INTO count FROM PortCompat WHERE (type1 = porta_type AND type2 = portb_type) OR (type1 = portb_type AND type2 = porta_type);
-  IF count = 0 THEN
-    SET NEW.porta = NULL;
-  END IF;
-END";
-
-		$query[] = "CREATE TRIGGER `checkPortCompatBeforeDelete` BEFORE DELETE ON `PortCompat`
-  FOR EACH ROW
-BEGIN
-  DECLARE count INTEGER;
-  SELECT COUNT(*) INTO count FROM Link LEFT JOIN Port AS PortA ON Link.porta = PortA.id LEFT JOIN Port AS PortB ON Link.portb = PortB.id WHERE (PortA.type = OLD.type1 AND PortB.type = OLD.type2) OR (PortA.type = OLD.type2 AND PortB.type = OLD.type1);
-  IF count > 0 THEN
-    UPDATE `Cannot delete: rule still used` SET x = 1;
-  END IF;
-END";
-
-		$query[] = "CREATE TRIGGER `checkPortCompatBeforeUpdate` BEFORE UPDATE ON `PortCompat`
-  FOR EACH ROW
-BEGIN
-  DECLARE count INTEGER;
-  SELECT COUNT(*) INTO count FROM Link LEFT JOIN Port AS PortA ON Link.porta = PortA.id LEFT JOIN Port AS PortB ON Link.portb = PortB.id WHERE (PortA.type = OLD.type1 AND PortB.type = OLD.type2) OR (PortA.type = OLD.type2 AND PortB.type = OLD.type1);
-  IF count > 0 THEN
-    UPDATE `Cannot update: rule still used` SET x = 1;
-  END IF;
+	IF NEW.porta <> OLD.porta OR NEW.portb <> OLD.portb THEN
+		$links_trigger_body;
+	END IF;
 END";
 
 		$query[] = "CREATE VIEW `Location` AS SELECT O.id, O.name, O.has_problems, O.comment, P.id AS parent_id, P.name AS parent_name
@@ -1881,7 +1891,7 @@ WHERE O.objtype_id = 1562";
 ('TAGS_QUICKLIST_SIZE','20','uint','no','no','yes','Tags quick list size'),
 ('TAGS_QUICKLIST_THRESHOLD','50','uint','yes','no','yes','Tags quick list threshold'),
 ('ENABLE_MULTIPORT_FORM','no','string','no','no','yes','Enable \"Add/update multiple ports\" form'),
-('DEFAULT_PORT_IIF_ID','1','uint','no','no','no','Default port inner interface ID'),
+('DEFAULT_PORT_IIF_ID','0;1','string','no','no','no','Default port inner interface IDs'),
 ('DEFAULT_PORT_OIF_IDS','0=2076; 1=24; 3=1078; 4=1077; 5=1079; 6=1080; 8=1082; 9=1084; 10=1588; 11=1668','string','no','no','no','Default port outer interface IDs'),
 ('IPV4_TREE_RTR_AS_CELL','no','string','no','no','yes','Show full router info for each network in IPv4 tree view'),
 ('PROXIMITY_RANGE','0','uint','yes','no','yes','Proximity range (0 is current rack only)'),

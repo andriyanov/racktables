@@ -107,6 +107,19 @@ $opspec_list['object-ports-deleteAll'] = array
 		array ('url_argname' => 'object_id', 'assertion' => 'uint'),
 	),
 );
+$opspec_list['object-ports-editLink'] = array
+(
+	'table' => 'Link',
+	'action' => 'UPDATE',
+	'set_arglist' => array
+	(
+		array ('url_argname' => 'cable', 'assertion' => 'stringN'),
+	),
+	'where_arglist' => array
+	(
+		array ('url_argname' => 'link_id', 'table_colname' => 'id', 'assertion' => 'uint'),
+	),
+);
 $opspec_list['location-log-del'] = array
 (
 	'table' => 'ObjectLog',
@@ -715,19 +728,13 @@ function editPortForObject ()
 {
 	global $sic;
 	assertUIntArg ('port_id');
-	if (array_key_exists ('port_type_id', $_REQUEST))
-	{
-		assertUIntArg ('port_type_id');
-		assertStringArg ('reservation_comment', TRUE);
-		genericAssertion ('l2address', 'l2address0');
-		genericAssertion ('name', 'string');
-		commitUpdatePort ($sic['object_id'], $sic['port_id'], $sic['name'], $sic['port_type_id'], $sic['label'], $sic['l2address'], $sic['reservation_comment']);
-	}
-	if (array_key_exists ('cable', $_REQUEST))
-	{
-		assertUIntArg ('link_id');
-		commitUpdatePortLink ($sic['link_id'], $sic['cable']);
-	}
+	assertUIntArg ('port_type_id');
+	assertStringArg ('reservation_comment', TRUE);
+	genericAssertion ('l2address', 'l2address0');
+	genericAssertion ('name', 'string');
+	commitUpdatePort ($sic['object_id'], $sic['port_id'], $sic['name'], $sic['port_type_id'], $sic['label'], $sic['l2address'], $sic['reservation_comment']);
+	if (array_key_exists('link_id', $_REQUEST) && array_key_exists ('cable', $_REQUEST))
+		commitUpdatePortLink (assertUIntArg ('link_id'), assertStringArg ('cable', TRUE));
 	return showFuncMessage (__FUNCTION__, 'OK', array ($_REQUEST['name']));
 }
 
@@ -1429,7 +1436,7 @@ function resetUIConfig()
 	setConfigVar ('TAGS_QUICKLIST_SIZE','20');
 	setConfigVar ('TAGS_QUICKLIST_THRESHOLD','50');
 	setConfigVar ('ENABLE_MULTIPORT_FORM', 'no');
-	setConfigVar ('DEFAULT_PORT_IIF_ID', '1');
+	setConfigVar ('DEFAULT_PORT_IIF_ID', '0;1');
 	setConfigVar ('DEFAULT_PORT_OIF_IDS', '0=2076; 1=24; 3=1078; 4=1077; 5=1079; 6=1080; 8=1082; 9=1084; 10=1588; 11=1668');
 	setConfigVar ('IPV4_TREE_RTR_AS_CELL', 'no');
 	setConfigVar ('PROXIMITY_RANGE', 0);

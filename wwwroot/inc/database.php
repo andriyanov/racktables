@@ -819,6 +819,9 @@ function processIPNetVlans (&$cell)
 
 function fetchPortList ($sql_where_clause, $query_params = array())
 {
+	$ret = array(); // indexed by order, not by port_id
+
+	// 1. Fetch ports
 	$query = <<<END
 SELECT
 	Port.id,
@@ -832,78 +835,92 @@ SELECT
 	Port.type AS oif_id,
 	(SELECT PortInnerInterface.iif_name FROM PortInnerInterface WHERE PortInnerInterface.id = Port.iif_id) AS iif_name,
 	(SELECT Dictionary.dict_value FROM Dictionary WHERE Dictionary.dict_key = Port.type) AS oif_name,
-	Link.id AS link_id,
-	Link.cable AS cableid,
-	IF(Link.porta = Port.id, Link.portb, Link.porta) AS remote_id,
-	rp.name AS remote_name,
-	rp.iif_id AS remote_iif_id,
-	rp.type AS remote_oif_id,
-	rp.object_id AS remote_object_id,
-	ro.name AS remote_object_name,
-	ro.objtype_id AS remote_object_type,
-	(SELECT COUNT(*) FROM PortLog WHERE PortLog.port_id = rp.id) AS log_count,
+	(SELECT COUNT(*) FROM PortLog WHERE PortLog.port_id = Port.id) AS log_count,
 	PortLog.user,
 	UNIX_TIMESTAMP(PortLog.date) AS time
 FROM
 	Port
 	INNER JOIN Object ON Port.object_id = Object.id
-	LEFT JOIN Link ON Port.id = Link.porta OR Port.id = Link.portb
-	LEFT JOIN Port AS rp ON (IF(Link.porta = Port.id, Link.portb, Link.porta)) = rp.id
-	LEFT JOIN Object AS ro ON rp.object_id = ro.id
-	LEFT JOIN PortLog ON PortLog.id = (SELECT id FROM PortLog WHERE PortLog.port_id = rp.id ORDER BY date DESC LIMIT 1)
+	LEFT JOIN PortLog ON PortLog.id = (SELECT id FROM PortLog WHERE PortLog.port_id = Port.id ORDER BY date DESC LIMIT 1)
 WHERE
 	$sql_where_clause
 ORDER BY Port.id
 END;
-
 	$result = usePreparedSelectBlade ($query, $query_params);
-	$ret = array();
-	$last_id = NULL;
 	while ($row = $result->fetch (PDO::FETCH_ASSOC))
 	{
-		// create a temporary array containing link info
-		$link_details = array
-		(
-			'link_id' => $row['link_id'],
-			'cableid' => $row['cableid'],
-			'remote_id' => $row['remote_id'],
-			'remote_name' => $row['remote_name'],
-			'remote_iif_id' => $row['remote_iif_id'],
-			'remote_oif_id' => $row['remote_oif_id'],
-			'remote_object_id' => $row['remote_object_id'],
-			'remote_object_name' => $row['remote_object_name'],
-			'remote_object_type' => $row['remote_object_type'],
-			'is_l1' => ($row['remote_object_type'] == 9), // patch panel link
-		);
-		$log_details = array
-		(
-			'user' => $row['user'],
-			'time' => $row['time'],
-		);
-
-		// see if this row represents an actual port or just an additional link
-		if ($row['id'] !== $last_id)
+		$portinfo = $row;
+		$portinfo['l1_links'] = array();
+		$portinfo['linked'] = 0;
+		$portinfo['l2address'] = l2addressFromDatabase ($row['l2address']);
+		$portinfo['last_log'] = array();
+		if ($row['log_count'])
 		{
-			$portinfo = array_sub ($row, $link_details + $log_details);
-			$portinfo['l2address'] = l2addressFromDatabase ($row['l2address']);
-			$portinfo['linked'] = isset ($row['remote_id']) ? 1 : 0;
-			$portinfo['links'] = array();
-			$portinfo['last_log'] = $row['log_count'] ? $log_details : array();
-
-			$ret[$portinfo['id']] = $portinfo;
+			$portinfo['last_log']['user'] = $row['user'];
+			$portinfo['last_log']['time'] = $row['time'];
 		}
-		if (isset ($row['remote_id']))
-		{
-			// place L2 links before L1
-			if ($link_details['is_l1'])
-				array_push ($ret[$row['id']]['links'], $link_details);
-			else
-				array_unshift ($ret[$row['id']]['links'], $link_details);
-		}
-
-		$last_id = $row['id'];
+		unset ($portinfo['user']);
+		unset ($portinfo['time']);
+		$ret[$portinfo['id']] = $portinfo;
 	}
-	return $ret;
+
+	// 2. Fetch links
+	$query = <<<END
+SELECT
+	Port.id,
+	Link.id AS link_id,
+	Link.cable AS cableid,
+	rp.id AS remote_id,
+	rp.name AS remote_name,
+	rp.object_id AS remote_object_id,
+	ro.name AS remote_object_name,
+	(Port.iif_id = 0 OR rp.iif_id = 0) AS l1_link
+FROM
+	Port
+	INNER JOIN Object ON Port.object_id = Object.id
+	INNER JOIN Link ON Link.porta = Port.id
+	INNER JOIN Port AS rp ON rp.id = Link.portb
+	INNER JOIN Object AS ro ON rp.object_id = ro.id
+WHERE
+	$sql_where_clause
+UNION SELECT
+	Port.id,
+	Link.id AS link_id,
+	Link.cable AS cableid,
+	rp.id AS remote_id,
+	rp.name AS remote_name,
+	rp.object_id AS remote_object_id,
+	ro.name AS remote_object_name,
+	(Port.iif_id = 0 OR rp.iif_id = 0) AS l1_link
+FROM
+	Port
+	INNER JOIN Object ON Port.object_id = Object.id
+	INNER JOIN Link ON Link.portb = Port.id
+	INNER JOIN Port AS rp ON rp.id = Link.porta
+	INNER JOIN Object AS ro ON rp.object_id = ro.id
+WHERE
+	$sql_where_clause
+END;
+
+	$result = usePreparedSelectBlade ($query, array_merge ($query_params, $query_params));
+	while ($row = $result->fetch (PDO::FETCH_ASSOC))
+	{
+		if (! isset ($ret[$row['id']]))
+			// assertion failed: fetched Link for Port which was not fetched on stage 1.
+			throw new RackTablesError ("Found link, but did not find port", RackTablesError::INTERNAL);
+		$linkinfo = $row;
+		unset ($linkinfo['l1_link']);
+		unset ($linkinfo['id']);
+		if ($row['l1_link'])
+			$ret[$row['id']]['l1_links'][] = $linkinfo;
+		else
+		{
+			$ret[$row['id']] += $linkinfo;
+			$ret[$row['id']]['linked'] = 1;
+		}
+	}
+
+	return array_values ($ret); // reindex by order, not by port_id
 }
 
 function getObjectPortsAndLinks ($object_id)
@@ -955,7 +972,7 @@ SELECT L.portb AS port_id, P.name AS port_name, P.object_id, O.name AS object_na
 FROM Link L 
 LEFT JOIN Port P ON L.portb = P.id 
 LEFT JOIN Object O ON P.object_id = O.id 
-WHERE L.porta = ? 
+WHERE L.porta = ?
 UNION 
 SELECT L.porta AS port_id, P.name AS port_name, P.object_id, O.name AS object_name  
 FROM Link L 
@@ -1787,6 +1804,10 @@ function linkPorts ($porta, $portb, $cable = NULL)
 	if ($porta == $portb)
 		throw new InvalidArgException ('porta/portb', $porta, "Ports can't be the same");
 
+	// get port types
+	$ports = reindexById (fetchPortList ('Port.id IN (?, ?)', array ($porta, $portb)));
+	$l1_link = (0 == $ports[$porta]['iif_id'] || 0 == $ports[$portb]['iif_id']);
+
 	usePreparedInsertBlade
 	(
 		'Link',
@@ -1797,25 +1818,18 @@ function linkPorts ($porta, $portb, $cable = NULL)
 			'cable' => mb_strlen ($cable) ? $cable : NULL
 		)
 	);
-	usePreparedExecuteBlade
-	(
-		'UPDATE Port SET reservation_comment=NULL WHERE id IN(?, ?)',
-		array ($porta, $portb)
-	);
+	if (! $l1_link)
+		usePreparedExecuteBlade
+		(
+			'UPDATE Port SET reservation_comment=NULL WHERE id IN(?, ?)',
+			array ($porta, $portb)
+		);
 
 	// log new links
-	$result = usePreparedSelectBlade
-	(
-		"SELECT Port.id, Port.name as port_name, Object.name as obj_name FROM Port " .
-		"INNER JOIN Object ON Port.object_id = Object.id WHERE Port.id IN (?, ?)",
-		array ($porta, $portb)
-	);
-	$rows = $result->fetchAll (PDO::FETCH_ASSOC);
-	unset ($result);
-	foreach ($rows as $row)
+	foreach ($ports as $row)
 	{
 		$pair_id = ($row['id'] == $porta ? $portb : $porta);
-		addPortLogEntry ($pair_id, sprintf ("linked to %s %s", $row['obj_name'], $row['port_name']));
+		addPortLogEntry ($pair_id, sprintf ("linked to %s %s", $row['object_name'], $row['name']));
 	}
 }
 
@@ -1831,24 +1845,12 @@ function commitUpdatePortLink ($link_id, $cable = NULL)
 function commitUnlinkPort ($link_id)
 {
 	// fetch and log existing link
-	$result = usePreparedSelectBlade
-	(
-		"SELECT	pa.id AS id_a, pa.name AS port_name_a, oa.name AS obj_name_a, " .
-		"pb.id AS id_b, pb.name AS port_name_b, ob.name AS obj_name_b " .
-		"FROM " .
-		"Link INNER JOIN Port pa ON pa.id = Link.porta " .
-		"INNER JOIN Port pb ON pb.id = Link.portb " .
-		"INNER JOIN RackObject oa ON pa.object_id = oa.id " .
-		"INNER JOIN RackObject ob ON pb.object_id = ob.id " .
-		"WHERE Link.id = ?",
-		array ($link_id)
-	);
-	$rows = $result->fetchAll (PDO::FETCH_ASSOC);
-	unset ($result);
-	foreach ($rows as $row)
+	$link_info = getPortLinkInfo ($link_id);
+	$ports = reindexById (fetchPortList ('Port.id IN (?, ?)', array ($link_info['porta'], $link_info['portb'])));
+	foreach ($ports as $row)
 	{
-		addPortLogEntry ($row['id_a'], sprintf ("unlinked from %s %s", $row['obj_name_b'], $row['port_name_b']));
-		addPortLogEntry ($row['id_b'], sprintf ("unlinked from %s %s", $row['obj_name_a'], $row['port_name_a']));
+		$pair_id = ($row['id'] == $link_info['porta'] ? $link_info['portb'] : $link_info['porta']);
+		addPortLogEntry ($row['id'], sprintf ("unlinked from %s %s", $ports[$pair_id]['object_name'], $ports[$pair_id]['name']));
 	}
 
 	// remove existing link

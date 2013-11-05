@@ -3132,9 +3132,15 @@ function isolatedPermission ($p, $t, $cell)
 
 function getPortListPrefs()
 {
-	$ret = array();
-	if (0 >= ($ret['iif_pick'] = getConfigVar ('DEFAULT_PORT_IIF_ID')))
-		$ret['iif_pick'] = 1;
+	$ret = array('iif_pick' => 1, 'iif_picks' => array(), 'oif_picks' => array());
+
+	foreach (explode (';', getConfigVar ('DEFAULT_PORT_IIF_ID')) as $tmp)
+	{
+		$ret['iif_picks'][$tmp] = 1;
+		if ($tmp >= 0)
+			$ret['iif_pick'] = $tmp;
+	}
+
 	$ret['oif_picks'] = array();
 	foreach (explode (';', getConfigVar ('DEFAULT_PORT_OIF_IDS')) as $tmp)
 	{
@@ -3144,32 +3150,8 @@ function getPortListPrefs()
 	}
 	// enforce default value
 	if (!array_key_exists (1, $ret['oif_picks']))
-		$ret['oif_picks'][1] = 24;
+		$ret['oif_picks'][1] = 24; // 1000Base-T
 	$ret['selected'] = $ret['iif_pick'] . '-' . $ret['oif_picks'][$ret['iif_pick']];
-	return $ret;
-}
-
-// Return data for printNiftySelect() with port type options. All OIF options
-// for the default IIF will be shown, but only the default OIFs will be present
-// for each other IIFs. IIFs, for which there is no default OIF, will not
-// be listed.
-// This SELECT will be used for the "add new port" form.
-function getNewPortTypeOptions()
-{
-	$ret = array();
-	$prefs = getPortListPrefs();
-	foreach (getPortInterfaceCompat() as $row)
-	{
-		if ($row['iif_id'] == $prefs['iif_pick'])
-			$optgroup = $row['iif_name'];
-		elseif (array_key_exists ($row['iif_id'], $prefs['oif_picks']) and $prefs['oif_picks'][$row['iif_id']] == $row['oif_id'])
-			$optgroup = 'other';
-		else
-			continue;
-		if (!array_key_exists ($optgroup, $ret))
-			$ret[$optgroup] = array();
-		$ret[$optgroup][$row['iif_id'] . '-' . $row['oif_id']] = $row['oif_name'];
-	}
 	return $ret;
 }
 
@@ -4530,12 +4512,18 @@ function authorize8021QChangeRequests ($before, $changes)
 	return $ret;
 }
 
-function formatPortIIFOIF ($port)
+function formatPortIIFOIF ($port, $sep = '/', $fmt_oif = NULL)
 {
 	$ret = '';
-	if ($port['iif_id'] != 1)
-		$ret .= $port['iif_name'] . '/';
-	$ret .= $port['oif_name'];
+	switch ($port['iif_id'])
+	{
+		case 0:
+		case 1:
+			break;
+		default:
+			$ret .= $port['iif_name'] . $sep;
+	}
+	$ret .= isset ($fmt_oif) ? $fmt_oif : $port['oif_name'];
 	return $ret;
 }
 
@@ -5957,7 +5945,7 @@ function sortLinks ($port_id, $unsorted_links, $sorted_links = array (), $level 
 		throw new InvalidArgException ('port', $port_id, 'tracing depth too deep - a loop probably exists');
 
 	// add the provided link to the sorted array
-	foreach ($unsorted_links as $link_id => $link)
+	foreach ($unsorted_links as $key => $link)
 	{
 		$remote_port_id = FALSE;
 		if ($link[0] == $port_id) $remote_port_id = $link[1];
@@ -5965,7 +5953,7 @@ function sortLinks ($port_id, $unsorted_links, $sorted_links = array (), $level 
 		if ($remote_port_id)
 		{
 			// note that this link has been sorted
-			unset ($unsorted_links[$link_id]);
+			unset ($unsorted_links[$key]);
 
 			//make sure this port_id is on the left (except if it's the last link, then it should be on the right)
 			if ($remote_port_id == $link[0])
