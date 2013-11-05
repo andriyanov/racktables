@@ -1580,7 +1580,6 @@ function renderPortsForObject ($object_id)
 	foreach ($object['ports'] as $portinfo)
 	{
 		$tr_class = isset ($hl_port_id) && $hl_port_id == $portinfo['id'] ? 'class="highlight"' : '';
-		$linked = $portinfo['linked'] || $portinfo['l1_links'];
 		$reserved = (0 != strlen ($portinfo['reservation_comment']));
 		$link_helper_args = array
 		(
@@ -1637,13 +1636,8 @@ function renderPortsForObject ($object_id)
 				echo "<td><input type=text name=label value='${port['label']}'></td>";
 
 				// 4. Interface type
-				if ($linked)
-					echo "<input type=hidden name=port_type_id value='${port['oif_id']}'>";
 				echo "<td class='tdleft'><label>";
-				if ($linked)
-					echo formatPortIIFOIF ($port);
-				else
-					echo formatPortIIFOIF ($port, ' ', getSelect (getExistingPortTypeOptions ($port['id']), array ('name' => 'port_type_id'), $port['oif_id']));
+				echo formatPortIIFOIF ($port, ' ', getSelect (getExistingPortTypeOptions ($port), array ('name' => 'port_type_id'), $port['oif_id']));
 				echo '</label></td>';
 
 				// 5. L2 address
@@ -1699,7 +1693,7 @@ function renderPortsForObject ($object_id)
 
 			echo '</tr></form>';
 
-			if ($first_row && $reserved && $linked && $port['linked'] !== 'L2')
+			if ($first_row && $reserved && $port['linked'] === 'L1')
 				$i--; // reservation field occupied one line, we need to process the current link again
 			$first_row = FALSE;
 		} // $links loop
@@ -8212,7 +8206,7 @@ function renderDiscoveredNeighbors ($object_id)
 					{
 						$tmp_types = ($portinfo['iif_id'] == 1) ?
 							array ($portinfo['oif_id'] => $portinfo['oif_name']) :
-							getExistingPortTypeOptions ($portinfo['id']);
+							getExistingPortTypeOptions ($portinfo);
 						foreach ($tmp_types as $oif_id => $oif_name)
 							$port_types[$side][$oif_id][] = array ('id' => $oif_id, 'name' => $oif_name, 'portinfo' => $portinfo);
 					}
