@@ -204,6 +204,8 @@ ENDOFTEXT
 0.20.6 uses database triggers for consistency measures.  The database
 user account must have the 'TRIGGER' privilege, which was introduced in
 MySQL 5.1.7.
+This release converts PatchPanels' port types into the 8P8C(RJ45). There are many
+changes being performed to the database, so BACKUP THE DATABASE BEFORE UPGRADE, PLEASE.
 
 Cable paths can be traced and displayed in a graphical format. This requires
 the Image_GraphViz PEAR module (http://pear.php.net/package/Image_GraphViz).
@@ -1869,6 +1871,9 @@ END;
 			$query[] = "INSERT INTO `PortInnerInterface` VALUES (0, 'cross')";
 			$query[] = "INSERT INTO `PortInterfaceCompat` VALUES (0,2076),(0,2077),(0,2078),(0,2079)";
 
+			// convert patch-panels port types into crossed / 8P8C
+			$query[] = "UPDATE Port INNER JOIN Object ON object_id = Object.id AND objtype_id = 9 SET Port.iif_id = 0, Port.type = 2076";
+
 			// create new PortCompat pairs
 			$copper_oifs = array (2076, 18, 1424, 24, 1087, 1316, 1603, 19, 1604, 1078, 1208, 1077, 682, 681, 29, 1642);
 			$fiber_oifs = array (2077, 2078, 2079, 1206, 1207, 1204, 1205, 1202, 1203, 34, 1198, 1199, 1200, 1195, 1197, 1196, 1201, 1671, 1670, 1669, 35, 36, 37, 39, 30, 38, 1664, 1663, 1668, 1078, 1588, 1084, 1208, 1077, 1080, 1079, 1082, 1081);
@@ -1884,6 +1889,7 @@ END;
 			$query[] = "INSERT INTO PortCompat SELECT pc1.type2, pc1.type1 FROM PortCompat pc1 LEFT JOIN PortCompat pc2 ON pc1.type1 = pc2.type2 AND pc1.type2 = pc2.type1 WHERE pc2.type1 IS NULL";
 
 			$query[] = "UPDATE `Config` SET varvalue = CONCAT('0=2076; ', varvalue) WHERE varname = 'DEFAULT_PORT_OIF_IDS'";
+			$query[] = "UPDATE `Config` SET varvalue = CONCAT(varvalue, ';9 = 24*0-2076*%u*1') WHERE varname = 'AUTOPORTS_CONFIG'";
 
 			// one HW type was moved from the 'Network switch' chapter to the 'Network chassis' chapter
 			// change the type of affected objects to 'Network chassis'

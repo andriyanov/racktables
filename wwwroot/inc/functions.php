@@ -1207,7 +1207,7 @@ function getAutoPorts ($type_id)
 			$tmp = explode ('*', $product);
 			if (count ($tmp) > 4 || count ($tmp) < 3)
 				continue;
-			# format: <number of ports>*<port_type_id>[*<sprintf_name>*<startnumber>]
+			# format: <number of ports>*<port_type_id>*<sprintf_name>[*<startnumber>]
 			$nports = $tmp[0];
 			$port_type = $tmp[1];
 			$format = $tmp[2];

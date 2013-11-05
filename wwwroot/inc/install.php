@@ -1846,7 +1846,7 @@ WHERE O.objtype_id = 1562";
 ('DETECT_URLS','no','string','yes','no','yes','Detect URLs in text fields'),
 ('RACK_PRESELECT_THRESHOLD','1','uint','no','no','yes','Rack pre-selection threshold'),
 ('DEFAULT_IPV4_RS_INSERVICE','no','string','no','no','yes','Inservice status for new SLB real servers'),
-('AUTOPORTS_CONFIG','4 = 1*33*kvm + 2*24*eth%u;15 = 1*446*kvm','string','yes','no','no','AutoPorts configuration'),
+('AUTOPORTS_CONFIG','4 = 1*33*kvm + 2*24*eth%u;15 = 1*446*kvm;9 = 24*0-2076*%u*1','string','yes','no','no','AutoPorts configuration'),
 ('DEFAULT_OBJECT_TYPE','4','uint','yes','no','yes','Default object type for new objects'),
 ('SHOW_EXPLICIT_TAGS','yes','string','no','no','yes','Show explicit tags'),
 ('SHOW_IMPLICIT_TAGS','yes','string','no','no','yes','Show implicit tags'),

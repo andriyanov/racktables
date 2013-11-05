@@ -107,6 +107,8 @@ should be sufficient:
 Database triggers are used for some data consistency measures.  The database
 user account must have the 'TRIGGER' privilege, which was introduced in
 MySQL 5.1.7.
+This release converts PatchPanels' port types into the 8P8C(RJ45). There are many
+changes being performed to the database, so BACKUP THE DATABASE BEFORE UPGRADE, PLEASE.
 
 Cable paths can be traced and displayed in a graphical format. This requires
 the Image_GraphViz PEAR module (http://pear.php.net/package/Image_GraphViz).

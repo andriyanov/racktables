@@ -1394,7 +1394,7 @@ function resetUIConfig()
 	setConfigVar ('DETECT_URLS','no');
 	setConfigVar ('RACK_PRESELECT_THRESHOLD','1');
 	setConfigVar ('DEFAULT_IPV4_RS_INSERVICE','no');
-	setConfigVar ('AUTOPORTS_CONFIG','4 = 1*33*kvm + 2*24*eth%u;15 = 1*446*kvm');
+	setConfigVar ('AUTOPORTS_CONFIG','4 = 1*33*kvm + 2*24*eth%u;15 = 1*446*kvm;9 = 24*0-2076*%u*1');
 	setConfigVar ('SHOW_EXPLICIT_TAGS','yes');
 	setConfigVar ('SHOW_IMPLICIT_TAGS','yes');
 	setConfigVar ('SHOW_AUTOMATIC_TAGS','no');

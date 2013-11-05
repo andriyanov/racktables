@@ -4865,12 +4865,22 @@ function renderLivePTR ($id)
 function renderAutoPortsForm ($object_id)
 {
 	$info = spotEntity ('object', $object_id);
+	$iiflist = getPortIIFOptions();
 	$ptlist = readChapter (CHAP_PORTTYPE, 'a');
 	echo "<table class='widetable' border=0 cellspacing=0 cellpadding=5 align='center'>\n";
 	echo "<caption>The following ports can be quickly added:</caption>";
 	echo "<tr><th>type</th><th>name</th></tr>";
 	foreach (getAutoPorts ($info['objtype_id']) as $autoport)
-		echo "<tr><td>" . $ptlist[$autoport['type']] . "</td><td>${autoport['name']}</td></tr>";
+	{
+		if (! preg_match ('/^(?:(\d+)-)?(\d+)$/', $autoport['type'], $m))
+			continue;
+		$iif_id = isset ($m[1]) ? $m[1] : 1;
+		$oif_id = $m[2];
+		$fmt_type = $ptlist[$oif_id];
+		if ($iif_id != 1 && $iif_id != 0)
+			$fmt_type = $iiflist[$iif_id] . ' / ' . $fmt_type;
+		echo "<tr><td>${fmt_type}</td><td>${autoport['name']}</td></tr>";
+	}
 	printOpFormIntro ('generate');
 	echo "<tr><td colspan=2 align=center>";
 	echo "<input type=submit value='Generate'>";
