@@ -6,6 +6,7 @@
 	bugfix: 404 response header for missing static files was incorrect (by Aleksandr Balezin)
 	bugfix: SLB IP assignments were stored even if a balancer object was deleted
 	bugfix: exception when searching for a alien IP address
+	bugfix: DB deadlocks in LDAP authentication when opening many tabs simultaneously
 	update: support of Huawei CE5800 series switch
 	update: port type could now be changed even if port is linked
 	update: mgmt link on FQDN (telnet, ssh, rdp) now supports any protocol (MGMT_PROTOS config var)
