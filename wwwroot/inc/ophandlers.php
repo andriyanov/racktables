@@ -107,6 +107,19 @@ $opspec_list['object-ports-deleteAll'] = array
 		array ('url_argname' => 'object_id', 'assertion' => 'uint'),
 	),
 );
+$opspec_list['object-ports-editLink'] = array
+(
+	'table' => 'Link',
+	'action' => 'UPDATE',
+	'set_arglist' => array
+	(
+		array ('url_argname' => 'cable', 'assertion' => 'stringN'),
+	),
+	'where_arglist' => array
+	(
+		array ('url_argname' => 'link_id', 'table_colname' => 'id', 'assertion' => 'uint'),
+	),
+);
 $opspec_list['location-log-del'] = array
 (
 	'table' => 'ObjectLog',
@@ -302,33 +315,13 @@ $opspec_list['parentmap-edit-del'] = array
 		array ('url_argname' => 'child_objtype_id', 'assertion' => 'uint'),
 	),
 );
-$opspec_list['portmap-edit-add'] = array
-(
-	'table' => 'PortCompat',
-	'action' => 'INSERT',
-	'arglist' => array
-	(
-		array ('url_argname' => 'type1', 'assertion' => 'uint'),
-		array ('url_argname' => 'type2', 'assertion' => 'uint'),
-	),
-);
-$opspec_list['portmap-edit-del'] = array
-(
-	'table' => 'PortCompat',
-	'action' => 'DELETE',
-	'arglist' => array
-	(
-		array ('url_argname' => 'type1', 'assertion' => 'uint'),
-		array ('url_argname' => 'type2', 'assertion' => 'uint'),
-	),
-);
 $opspec_list['portifcompat-edit-del'] = array
 (
 	'table' => 'PortInterfaceCompat',
 	'action' => 'DELETE',
 	'arglist' => array
 	(
-		array ('url_argname' => 'iif_id', 'assertion' => 'uint'),
+		array ('url_argname' => 'iif_id', 'assertion' => 'iif'),
 		array ('url_argname' => 'oif_id', 'assertion' => 'uint'),
 	),
 );
@@ -740,8 +733,8 @@ function editPortForObject ()
 	genericAssertion ('l2address', 'l2address0');
 	genericAssertion ('name', 'string');
 	commitUpdatePort ($sic['object_id'], $sic['port_id'], $sic['name'], $sic['port_type_id'], $sic['label'], $sic['l2address'], $sic['reservation_comment']);
-	if (array_key_exists ('cable', $_REQUEST))
-		commitUpdatePortLink ($sic['port_id'], $sic['cable']);
+	if (array_key_exists('link_id', $_REQUEST) && array_key_exists ('cable', $_REQUEST))
+		commitUpdatePortLink (assertUIntArg ('link_id'), assertStringArg ('cable', TRUE));
 	return showFuncMessage (__FUNCTION__, 'OK', array ($_REQUEST['name']));
 }
 
@@ -1408,7 +1401,7 @@ function resetUIConfig()
 	setConfigVar ('DETECT_URLS','no');
 	setConfigVar ('RACK_PRESELECT_THRESHOLD','1');
 	setConfigVar ('DEFAULT_IPV4_RS_INSERVICE','no');
-	setConfigVar ('AUTOPORTS_CONFIG','4 = 1*33*kvm + 2*24*eth%u;15 = 1*446*kvm');
+	setConfigVar ('AUTOPORTS_CONFIG','4 = 1*33*kvm + 2*24*eth%u;15 = 1*446*kvm;9 = 24*0-2076*%u*1');
 	setConfigVar ('SHOW_EXPLICIT_TAGS','yes');
 	setConfigVar ('SHOW_IMPLICIT_TAGS','yes');
 	setConfigVar ('SHOW_AUTOMATIC_TAGS','no');
@@ -1443,8 +1436,8 @@ function resetUIConfig()
 	setConfigVar ('TAGS_QUICKLIST_SIZE','20');
 	setConfigVar ('TAGS_QUICKLIST_THRESHOLD','50');
 	setConfigVar ('ENABLE_MULTIPORT_FORM', 'no');
-	setConfigVar ('DEFAULT_PORT_IIF_ID', '1');
-	setConfigVar ('DEFAULT_PORT_OIF_IDS', '1=24; 3=1078; 4=1077; 5=1079; 6=1080; 8=1082; 9=1084; 10=1588; 11=1668');
+	setConfigVar ('DEFAULT_PORT_IIF_ID', '0;1');
+	setConfigVar ('DEFAULT_PORT_OIF_IDS', '0=2076; 1=24; 3=1078; 4=1077; 5=1079; 6=1080; 8=1082; 9=1084; 10=1588; 11=1668');
 	setConfigVar ('IPV4_TREE_RTR_AS_CELL', 'no');
 	setConfigVar ('PROXIMITY_RANGE', 0);
 	setConfigVar ('IPV4_TREE_SHOW_VLAN', 'yes');
@@ -2113,7 +2106,7 @@ function addLocation ()
 	$location_id = commitAddObject ($_REQUEST['name'], NULL, 1562, NULL);
 	if ($_REQUEST['parent_id'])
 		commitLinkEntities ('location', $_REQUEST['parent_id'], 'location', $location_id);
-	return showFuncMessage (__FUNCTION__, 'OK', array ($_REQUEST['name']));
+	return showSuccess ('added location ' . mkA ($_REQUEST['name'], 'location', $location_id));
 }
 
 $msgcode['updateLocation']['OK'] = 6;
@@ -2182,7 +2175,7 @@ function addRow ()
 	$row_id = commitAddObject ($_REQUEST['name'], NULL, 1561, NULL);
 	if ($_REQUEST['location_id'])
 		commitLinkEntities ('location', $_REQUEST['location_id'], 'row', $row_id);
-	return showFuncMessage (__FUNCTION__, 'OK', array ($_REQUEST['name']));
+	return showSuccess ('added row ' . mkA ($_REQUEST['name'], 'row', $row_id));
 }
 
 $msgcode['updateRow']['OK'] = 6;
@@ -2512,7 +2505,7 @@ function updateFileText ()
 $msgcode['addIIFOIFCompat']['OK'] = 48;
 function addIIFOIFCompat ()
 {
-	assertUIntArg ('iif_id');
+	genericAssertion ('iif_id', 'iif');
 	assertUIntArg ('oif_id');
 	commitSupplementPIC ($_REQUEST['iif_id'], $_REQUEST['oif_id']);
 	return showFuncMessage (__FUNCTION__, 'OK');
@@ -2531,6 +2524,22 @@ function addIIFOIFCompatPack ()
 		$ngood++;
 	}
 	return showFuncMessage (__FUNCTION__, 'OK', array ($ngood));
+}
+
+function addOIFCompat ()
+{
+	$type1 = assertUIntArg ('type1');
+	$type2 = assertUIntArg ('type2');
+	$n_changed = addPortOIFCompat ($type1, $type2);
+	showSuccess ("$n_changed row(s) added");
+}
+
+function delOIFCompat ()
+{
+	$type1 = assertUIntArg ('type1');
+	$type2 = assertUIntArg ('type2');
+	$n_changed = deletePortOIFCompat ($type1, $type2);
+	showSuccess ("$n_changed row(s) deleted");
 }
 
 $msgcode['delIIFOIFCompatPack']['OK'] = 38;
@@ -2552,12 +2561,13 @@ $msgcode['addOIFCompatPack']['OK'] = 21;
 function addOIFCompatPack ()
 {
 	genericAssertion ('standard', 'enum/wdmstd');
-	global $wdm_packs;
+	global $wdm_packs, $dbxlink;
 	$oifs = $wdm_packs[$_REQUEST['standard']]['oif_ids'];
+	$dbxlink->beginTransaction();
 	foreach ($oifs as $oif_id_1)
 	{
 		$args = $qmarks = array();
-		$query = 'REPLACE INTO PortCompat (type1, type2) VALUES ';
+		$query = 'INSERT IGNORE INTO PortCompat (type1, type2) VALUES ';
 		foreach ($oifs as $oif_id_2)
 		{
 			$qmarks[] = '(?, ?)';
@@ -2567,6 +2577,7 @@ function addOIFCompatPack ()
 		$query .= implode (', ', $qmarks);
 		usePreparedExecuteBlade ($query, $args);
 	}
+	$dbxlink->commit();
 	return showFuncMessage (__FUNCTION__, 'OK');
 }
 
@@ -2574,12 +2585,14 @@ $msgcode['delOIFCompatPack']['OK'] = 21;
 function delOIFCompatPack ()
 {
 	genericAssertion ('standard', 'enum/wdmstd');
-	global $wdm_packs;
+	global $wdm_packs, $dbxlink;
 	$oifs = $wdm_packs[$_REQUEST['standard']]['oif_ids'];
+	$dbxlink->beginTransaction();
 	foreach ($oifs as $oif_id_1)
 		foreach ($oifs as $oif_id_2)
 			if ($oif_id_1 != $oif_id_2) # leave narrow-band mapping intact
 				usePreparedDeleteBlade ('PortCompat', array ('type1' => $oif_id_1, 'type2' => $oif_id_2));
+	$dbxlink->commit();
 	return showFuncMessage (__FUNCTION__, 'OK');
 }
 
@@ -3188,9 +3201,9 @@ function getOpspec()
 
 function unlinkPort ()
 {
-	assertUIntArg ('port_id');
-	commitUnlinkPort ($_REQUEST['port_id']);
-	showSuccess ("Port unlinked successfully");
+	assertUIntArg ('link_id');
+	commitUnlinkPort ($_REQUEST['link_id']);
+	showSuccess ('Port unlinked successfully');
 }
 
 function clearVlan()

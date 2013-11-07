@@ -75,14 +75,21 @@ class EntityNotFoundException extends RackTablesError
 	}
 	public function dispatch()
 	{
-		global $debug_mode;
+		global $debug_mode, $pageno, $pageno_by_etype;
 		if ($debug_mode)
 		{
 			printGenericException ($this);
 			return;
 		}
-		showError ($this->message);
-		redirectUser (buildRedirectURL('index', 'default'));
+		if (isset ($pageno) && isset ($pageno_by_etype[$entity]) && $pageno_by_etype[$entity] == $pageno)
+		{
+			// redirect user to the main page if he refers to a page of nonexistant entity.
+			showError ($this->message);
+			redirectUser (buildRedirectURL('index', 'default'));
+		}
+		else
+			// otherwise (ajax handler, etc), display error page
+			RackTablesError::genHTMLPage ('Missing record', "<h2>Missing record</h2><br>" . $this->message);
 	}
 }
 

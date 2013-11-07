@@ -280,6 +280,8 @@ function genericAssertion ($argname, $argtype)
 		return assertStringArg ($argname);
 	case 'string0':
 		return assertStringArg ($argname, TRUE);
+	case 'stringN':
+		return nullEmptyStr (assertStringArg ($argname, TRUE));
 	case 'uint':
 		return assertUIntArg ($argname);
 	case 'uint-uint':
@@ -369,7 +371,7 @@ function genericAssertion ($argname, $argtype)
 			throw new InvalidRequestArgException ($argname, $sic[$argname], 'Unknown value');
 		return $sic[$argname];
 	case 'iif':
-		assertUIntArg ($argname);
+		assertUIntArg ($argname, TRUE);
 		if (!array_key_exists ($sic[$argname], getPortIIFOptions()))
 			throw new InvalidRequestArgException ($argname, $sic[$argname], 'Unknown value');
 		return $sic[$argname];
@@ -1111,7 +1113,7 @@ function string_insert_hrefs ($s)
 		return $s;
 
 	$rexProtocol  = '(https?://)?';
-	$rexDomain    = '(?:[-a-zA-Z0-9]{1,63}\.)+[a-zA-Z][-a-zA-Z0-9]{1,62}';
+	$rexDomain    = '(?:[-a-zA-Z0-9]{1,63}\.)*[a-zA-Z][-a-zA-Z0-9]{1,62}';
 	$rexIp        = '(?:[1-9][0-9]{0,2}\.|0\.){3}(?:[1-9][0-9]{0,2}|0)'; // doesn't support IPv6 addresses
 	$rexPort      = '(:[0-9]{1,5})?';
 	$rexPath      = '(/[!$-/0-9:;=@_\':;!a-zA-Z\x7f-\xff]*?)?';
@@ -1205,7 +1207,7 @@ function getAutoPorts ($type_id)
 			$tmp = explode ('*', $product);
 			if (count ($tmp) > 4 || count ($tmp) < 3)
 				continue;
-			# format: <number of ports>*<port_type_id>[*<sprintf_name>*<startnumber>]
+			# format: <number of ports>*<port_type_id>*<sprintf_name>[*<startnumber>]
 			$nports = $tmp[0];
 			$port_type = $tmp[1];
 			$format = $tmp[2];
@@ -3130,44 +3132,26 @@ function isolatedPermission ($p, $t, $cell)
 
 function getPortListPrefs()
 {
-	$ret = array();
-	if (0 >= ($ret['iif_pick'] = getConfigVar ('DEFAULT_PORT_IIF_ID')))
-		$ret['iif_pick'] = 1;
+	$ret = array('iif_pick' => 1, 'iif_picks' => array(), 'oif_picks' => array());
+
+	foreach (explode (';', getConfigVar ('DEFAULT_PORT_IIF_ID')) as $tmp)
+	{
+		$ret['iif_picks'][$tmp] = 1;
+		if ($tmp >= 0)
+			$ret['iif_pick'] = $tmp;
+	}
+
 	$ret['oif_picks'] = array();
 	foreach (explode (';', getConfigVar ('DEFAULT_PORT_OIF_IDS')) as $tmp)
 	{
 		$tmp = explode ('=', trim ($tmp));
-		if (count ($tmp) == 2 and $tmp[0] > 0 and $tmp[1] > 0)
+		if (count ($tmp) == 2 and $tmp[0] >= 0 and $tmp[1] > 0)
 			$ret['oif_picks'][$tmp[0]] = $tmp[1];
 	}
 	// enforce default value
 	if (!array_key_exists (1, $ret['oif_picks']))
-		$ret['oif_picks'][1] = 24;
+		$ret['oif_picks'][1] = 24; // 1000Base-T
 	$ret['selected'] = $ret['iif_pick'] . '-' . $ret['oif_picks'][$ret['iif_pick']];
-	return $ret;
-}
-
-// Return data for printNiftySelect() with port type options. All OIF options
-// for the default IIF will be shown, but only the default OIFs will be present
-// for each other IIFs. IIFs, for which there is no default OIF, will not
-// be listed.
-// This SELECT will be used for the "add new port" form.
-function getNewPortTypeOptions()
-{
-	$ret = array();
-	$prefs = getPortListPrefs();
-	foreach (getPortInterfaceCompat() as $row)
-	{
-		if ($row['iif_id'] == $prefs['iif_pick'])
-			$optgroup = $row['iif_name'];
-		elseif (array_key_exists ($row['iif_id'], $prefs['oif_picks']) and $prefs['oif_picks'][$row['iif_id']] == $row['oif_id'])
-			$optgroup = 'other';
-		else
-			continue;
-		if (!array_key_exists ($optgroup, $ret))
-			$ret[$optgroup] = array();
-		$ret[$optgroup][$row['iif_id'] . '-' . $row['oif_id']] = $row['oif_name'];
-	}
 	return $ret;
 }
 
@@ -4528,12 +4512,18 @@ function authorize8021QChangeRequests ($before, $changes)
 	return $ret;
 }
 
-function formatPortIIFOIF ($port)
+function formatPortIIFOIF ($port, $sep = '/', $fmt_oif = NULL)
 {
 	$ret = '';
-	if ($port['iif_id'] != 1)
-		$ret .= $port['iif_name'] . '/';
-	$ret .= $port['oif_name'];
+	switch ($port['iif_id'])
+	{
+		case 0:
+		case 1:
+			break;
+		default:
+			$ret .= $port['iif_name'] . $sep;
+	}
+	$ret .= isset ($fmt_oif) ? $fmt_oif : $port['oif_name'];
 	return $ret;
 }
 
@@ -4576,14 +4566,17 @@ function formatPort ($port_info, $a_class = '')
 // function returns a HTML-formatted link to remote port, connected to the specified port
 function formatLinkedPort ($port_info, $a_class = '')
 {
-	return formatPortLink
-	(
-		$port_info['remote_object_id'],
-		$port_info['remote_object_name'],
-		$port_info['remote_id'],
-		$port_info['remote_name'],
-		$a_class
-	);
+	if (! $link_info = array_first ($port_info['links']))
+		return formatPort ($port_info, $a_class);
+	else
+		return formatPortLink
+		(
+			$link_info['remote_object_id'],
+			$link_info['remote_object_name'],
+			$link_info['remote_id'],
+			$link_info['remote_name'],
+			$a_class
+		);
 }
 
 function compareDecomposedPortNames ($porta, $portb)
@@ -5943,6 +5936,39 @@ function isCLIMode ()
 	return !isset ($_SERVER['REQUEST_METHOD']);
 }
 
+// Used to sort a chain of links from start to finish (sorts by port_id)
+function sortLinks ($port_id, $unsorted_links, $sorted_links = array (), $level = 0)
+{
+	$self = __FUNCTION__;
+
+	if ($level >= 10)
+		throw new InvalidArgException ('port', $port_id, 'tracing depth too deep - a loop probably exists');
+
+	// add the provided link to the sorted array
+	foreach ($unsorted_links as $key => $link)
+	{
+		$remote_port_id = FALSE;
+		if ($link[0] == $port_id) $remote_port_id = $link[1];
+		if ($link[1] == $port_id) $remote_port_id = $link[0];
+		if ($remote_port_id)
+		{
+			// note that this link has been sorted
+			unset ($unsorted_links[$key]);
+
+			//make sure this port_id is on the left (except if it's the last link, then it should be on the right)
+			if ($remote_port_id == $link[0])
+			{
+				$tmp = $link[0];
+				$link[0] = $link[1];
+				$link[1] = $tmp;
+			}
+			$sorted_links[] = $link;
+			$sorted_links = $self ($remote_port_id, $unsorted_links, $sorted_links, $level+1);
+		}
+	}
+	return $sorted_links;
+}
+
 // Checks if 802.1Q port uplink/downlink feature is misconfigured.
 // Returns FALSE if 802.1Q port role/linking is wrong, TRUE otherwise.
 function checkPortRole ($vswitch, $port_name, $port_order)
@@ -6054,15 +6080,16 @@ function printLocationChildrenSelectOptions ($location, $level, $parent_id, $loc
 	$self = __FUNCTION__;
 	$level++;
 	foreach ($location['kids'] as $subLocation)
-		if ($subLocation['id'] != $location_id)
-		{
-			echo "<option value=${subLocation['id']}";
-			if ($subLocation['id'] == $parent_id)
-				echo ' selected';
-			echo '>' . str_repeat ('&raquo; ', $level) . "${subLocation['name']}</option>\n";
-			if ($subLocation['kidc'] > 0)
-				$self ($subLocation, $level, $parent_id, $location_id);
-		}
+	{
+		if ($subLocation['id'] == $location_id)
+			continue;
+		echo "<option value=${subLocation['id']}";
+		if ($subLocation['id'] == $parent_id)
+			echo ' selected';
+		echo '>' . str_repeat ('&raquo; ', $level) . "${subLocation['name']}</option>\n";
+		if ($subLocation['kidc'] > 0)
+			$self ($subLocation, $level, $parent_id, $location_id);
+	}
 }
 
 function validTagName ($s, $allow_autotag = FALSE)
@@ -6072,6 +6099,32 @@ function validTagName ($s, $allow_autotag = FALSE)
 	if ($allow_autotag && preg_match (AUTOTAGNAME_REGEXP, $s))
 		return TRUE;
 	return FALSE;
+}
+
+// returns html string with parent location names
+// link: if each name should be wrapped in an href
+function getLocationTrail ($location_id, $link = TRUE, $spacer = ' : ')
+{
+	$locations = listCells ('location');
+
+	static $location_tree = array ();
+	if (count ($location_tree) == 0)
+		foreach ($locations as $location)
+			$location_tree[$location['id']] = array ('parent_id' => $location['parent_id'], 'name' => $location['name']);
+
+	// prepend parent location(s) to given location string
+	$name = '';
+	$id = $location_id;
+	while (isset ($id))
+	{
+		if ($link)
+			$name = mkA ($location_tree[$id]['name'], 'location', $id) . $spacer . $name;
+		else
+			$name = $location_tree[$id]['name'] . $spacer . $name;
+		$id = $location_tree[$id]['parent_id'];
+	}
+	$name = substr ($name, 0, 0 - strlen ($spacer));
+	return $name;
 }
 
 function cmp_array_sizes ($a, $b)

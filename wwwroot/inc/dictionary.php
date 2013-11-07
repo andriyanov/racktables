@@ -38,9 +38,11 @@ function isInnoDBSupported ()
 	global $dbxlink;
 	// create a temp table
 	$dbxlink->query("CREATE TABLE `innodb_test` (`id` int) ENGINE=InnoDB");
-	$row = $dbxlink->query("SHOW TABLE STATUS LIKE 'innodb_test'")->fetch(PDO::FETCH_ASSOC);
+	$innodb_row = $dbxlink->query("SHOW TABLE STATUS LIKE 'innodb_test'")->fetch(PDO::FETCH_ASSOC);
+	$dbxlink->query("CREATE TRIGGER `trigger_test` BEFORE INSERT ON `innodb_test` FOR EACH ROW BEGIN END");
+	$trigger_row = $dbxlink->query("SELECT COUNT(*) AS count FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = SCHEMA() AND TRIGGER_NAME = 'trigger_test'")->fetch(PDO::FETCH_ASSOC);
 	$dbxlink->query("DROP TABLE `innodb_test`");
-	if ($row['Engine'] == 'InnoDB')
+	if ($innodb_row['Engine'] == 'InnoDB' && $trigger_row['count'] == 1)
 		return TRUE;
 
 	return FALSE;
@@ -85,6 +87,14 @@ function platform_is_ok ()
 	$nerrs += platform_function_test ('json_encode', 'JSON extension', 'JavaScript interface bits may fail.');
 	platform_generic_test (in_array  ('curl', get_loaded_extensions()), 'cURL extension', 'Not found, Cacti Graph integration is unavailable.', 'trwarning');
 	$nerrs += platform_function_test ('bcmul', 'BC Math extension');
+	@include_once 'Image/GraphViz.php';
+	platform_generic_test
+	(
+		class_exists ('Image_GraphViz'),
+		'GraphViz PEAR module',
+		'Not found, graphical cable path tracing is unavailable',
+		'trwarning'
+	);
 	platform_generic_test
 	(
 		(!empty($_SERVER['HTTPS']) and $_SERVER['HTTPS'] != 'off'),
@@ -228,7 +238,7 @@ $dictionary = array
 	136 => array ('chapter_id' => 12, 'dict_value' => 'Foundry%GPASS%FastIron Edge X424-POE'),
 	137 => array ('chapter_id' => 12, 'dict_value' => 'Foundry%GPASS%FastIron SX 800'),
 	138 => array ('chapter_id' => 12, 'dict_value' => 'Foundry%GPASS%FastIron SX 1600'),
-	139 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 3560-8PC'),
+	139 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst WS-C3560-8PC'),
 	140 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2960-48TC-S'),
 	141 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 3560-E'),
 	142 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst Express 500-24LC'),
@@ -468,11 +478,11 @@ $dictionary = array
 	378 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%ME 4924-10GE'),
 	379 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2960-24-S'),
 	380 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2950-24'),
-	381 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2950-12'),
+	381 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst WS-C2950-12'),
 	382 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2950C-24'),
-	383 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2950G-24-DC'),
+	383 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst WS-C2950G-24-DC'),
 	384 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2950SX-48'),
-	385 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2950SX-24'),
+	385 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst WS-C2950SX-24'),
 	386 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2950T-24'),
 	387 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2950T-48'),
 	388 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2950G-12'),
@@ -480,7 +490,7 @@ $dictionary = array
 	390 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 2950G-48'),
 	391 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 3508G XL'),
 	392 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 3512 XL'),
-	393 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 3524 XL'),
+	393 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst WS-C3524-XL'),
 	394 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 3524 PWR XL'),
 	395 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 3548 XL'),
 	396 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%ME 2400-24TS-A'),
@@ -956,7 +966,7 @@ $dictionary = array
 	866 => array ('chapter_id' => 12, 'dict_value' => 'HP ProCurve%GPASS%2650'),
 	867 => array ('chapter_id' => 12, 'dict_value' => 'HP ProCurve%GPASS%2650-PWR'),
 	868 => array ('chapter_id' => 12, 'dict_value' => 'HP ProCurve%GPASS%2810-24G'),
-	869 => array ('chapter_id' => 12, 'dict_value' => 'HP ProCurve%GPASS%2810-48G'),
+	869 => array ('chapter_id' => 12, 'dict_value' => 'HP ProCurve%GPASS%2810-48G J9022A'),
 	870 => array ('chapter_id' => 12, 'dict_value' => 'HP ProCurve%GPASS%2824'),
 	871 => array ('chapter_id' => 12, 'dict_value' => 'HP ProCurve%GPASS%2848'),
 	872 => array ('chapter_id' => 12, 'dict_value' => 'HP ProCurve%GPASS%2900-24G'),
@@ -1022,7 +1032,7 @@ $dictionary = array
 	932 => array ('chapter_id' => 13, 'dict_value' => 'RH Fedora%GSKIP%Fedora 10'),
 	933 => array ('chapter_id' => 13, 'dict_value' => 'OpenSUSE%GSKIP%openSUSE 11.1'),
 	934 => array ('chapter_id' => 12, 'dict_value' => '[[F5%GPASS%BIG-IP WebAccelerator 4500 | http://www.f5.com/pdf/products/big-ip-webaccelerator-ds.pdf]]'),
-	935 => array ('chapter_id' => 12, 'dict_value' => '[[F5%GPASS%VIPRION | http://www.f5.com/pdf/products/viprion-overview-ds.pdf]]'),
+	935 => array ('chapter_id' => 30, 'dict_value' => 'F5%GPASS%VIPRION 2400%L2,2H'),
 	936 => array ('chapter_id' => 12, 'dict_value' => '[[F5%GPASS%BIG-IP 1500 | http://www.f5.com/pdf/products/big-ip-platforms-2007-ds.pdf]]'),
 	937 => array ('chapter_id' => 12, 'dict_value' => '[[F5%GPASS%BIG-IP 1600 | http://www.f5.com/pdf/products/big-ip-platforms-ds.pdf]]'),
 	938 => array ('chapter_id' => 12, 'dict_value' => '[[F5%GPASS%BIG-IP 3400 | http://www.f5.com/pdf/products/big-ip-platforms-2007-ds.pdf]]'),
@@ -1234,7 +1244,7 @@ $dictionary = array
 	1147 => array ('chapter_id' => 27, 'dict_value' => '[[APC%GPASS%AP9565 | http://www.apc.com/products/resource/include/techspec_index.cfm?base_sku=AP9565]]'),
 	1148 => array ('chapter_id' => 27, 'dict_value' => '[[APC%GPASS%AP9568 | http://www.apc.com/products/resource/include/techspec_index.cfm?base_sku=AP9568]]'),
 	1149 => array ('chapter_id' => 27, 'dict_value' => '[[APC%GPASS%AP9572 | http://www.apc.com/products/resource/include/techspec_index.cfm?base_sku=AP9572]]'),
-	1150 => array ('chapter_id' => 30, 'dict_value' => '[[Cisco%GPASS%Catalyst 6509-V-E%L9,1H% | http://www.cisco.com/en/US/products/ps9306/index.html]]'),
+	1150 => array ('chapter_id' => 30, 'dict_value' => '[[Cisco%GPASS%Catalyst 6509-V-E%L9,1V% | http://www.cisco.com/en/US/products/ps9306/index.html]]'),
 	1151 => array ('chapter_id' => 27, 'dict_value' => '[[APC%GPASS%AP7902J | http://www.apc.com/products/resource/include/techspec_index.cfm?base_sku=AP7902J]]'),
 	1152 => array ('chapter_id' => 27, 'dict_value' => '[[APC%GPASS%AP7930J | http://www.apc.com/products/resource/include/techspec_index.cfm?base_sku=AP7930J]]'),
 	1153 => array ('chapter_id' => 27, 'dict_value' => '[[APC%GPASS%AP7932J | http://www.apc.com/products/resource/include/techspec_index.cfm?base_sku=AP7932J]]'),
@@ -1606,10 +1616,10 @@ $dictionary = array
 	1519 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M605'),
 	1520 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M610'),
 	1521 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M610x'),
-	1522 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M710'),
-	1523 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M805'),
-	1524 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M905'),
-	1525 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M910'),
+	1522 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M710%L2,1%'),
+	1523 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M805%L2,1%'),
+	1524 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M905%L2,1%'),
+	1525 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M910%L2,1%'),
 	1526 => array ('chapter_id' => 26, 'dict_value' => 'Brocade (blade)%GPASS%McDATA 3014'),
 	1527 => array ('chapter_id' => 26, 'dict_value' => 'Brocade (blade)%GPASS%McDATA 4314'),
 	1528 => array ('chapter_id' => 26, 'dict_value' => 'Brocade (blade)%GPASS%McDATA 4416'),
@@ -1781,7 +1791,7 @@ $dictionary = array
 	1695 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge%GPASS%R815'),
 	1696 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M620'),
 	1697 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M710HD'),
-	1698 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M915'),
+	1698 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M915%L2,1%'),
 	1699 => array ('chapter_id' => 12, 'dict_value' => 'Dell PowerConnect (blade)%GPASS%M6348'),
 	1700 => array ('chapter_id' => 12, 'dict_value' => 'Dell PowerConnect (blade)%GPASS%M8428'),
 	1701 => array ('chapter_id' => 13, 'dict_value' => '[[RH Fedora%GSKIP%Fedora 16 | http://docs.fedoraproject.org/en-US/Fedora/16/html/Release_Notes/]]'),
@@ -2112,10 +2122,47 @@ $dictionary = array
 	2026 => array ('chapter_id' => 12, 'dict_value' => '[[Cisco%GPASS%Catalyst 4948E | http://www.cisco.com/en/US/products/ps10947/index.html]]'),
 	2027 => array ('chapter_id' => 14, 'dict_value' => 'Huawei VRP 8.5'),
 	2028 => array ('chapter_id' => 14, 'dict_value' => 'Cisco NX-OS 6.1'),
-	2028 => array ('chapter_id' => 14, 'dict_value' => 'Cisco NX-OS 6.1'),
+	2029 => array ('chapter_id' => 12, 'dict_value' => '[[Cisco%GPASS%Catalyst C2960CG-8TC-L | http://www.cisco.com/en/US/products/ps6406/index.html]]'),
+	2030 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%ME-3400EG-2CS-A'),
+	2031 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M520'),
+	2032 => array ('chapter_id' => 11, 'dict_value' => 'Dell PowerEdge (blade)%GPASS%M820%L2,1%'),
+	2033 => array ('chapter_id' => 30, 'dict_value' => 'F5%GPASS%VIPRION 4480%L4,1H'),
+	2034 => array ('chapter_id' => 30, 'dict_value' => 'F5%GPASS%VIPRION 4800%L1,8V'),
+	2035 => array ('chapter_id' => 12, 'dict_value' => 'F5 (blade)%GPASS%VIPRION 2100'),
+	2036 => array ('chapter_id' => 12, 'dict_value' => 'F5 (blade)%GPASS%VIPRION 4200'),
+	2037 => array ('chapter_id' => 12, 'dict_value' => 'F5 (blade)%GPASS%VIPRION 4300'),
+	2038 => array ('chapter_id' => 12, 'dict_value' => '[[Cisco%GPASS%Catalyst WS-CBS3012-IBM/-I | http://www.cisco.com/en/US/products/ps8766/index.html]]'),
+	2039 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%RB1000U'),
+	2040 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%RB1100'),
+	2041 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%RB1100Hx2'),
+	2042 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%RB1100AH'),
+	2043 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%RB1100AHx2'),
+	2044 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%RB1200'),
+	2045 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%RB2011L-RM'),
+	2046 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%RB2011iL-RM'),
+	2047 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%RB2011UAS-RM'),
+	2048 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%CCR1016-12G'),
+	2049 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%CCR1036-8G-2S+'),
+	2050 => array ('chapter_id' => 17, 'dict_value' => 'MikroTik%GPASS%CCR1036-12G-4S'),
+	2051 => array ('chapter_id' => 12, 'dict_value' => 'Arista%GPASS%7150S-24'),
+	2052 => array ('chapter_id' => 12, 'dict_value' => 'Arista%GPASS%7150S-52'),
+	2053 => array ('chapter_id' => 12, 'dict_value' => 'Arista%GPASS%7150S-64'),
+	2054 => array ('chapter_id' => 12, 'dict_value' => 'Arista%GPASS%7100S'),
+	2055 => array ('chapter_id' => 12, 'dict_value' => 'Arista%GPASS%7050T-36'),
+	2056 => array ('chapter_id' => 12, 'dict_value' => 'Arista%GPASS%7050QX-32'),
+	2057 => array ('chapter_id' => 12, 'dict_value' => 'Arista%GPASS%7050SX-128'),
+	2058 => array ('chapter_id' => 12, 'dict_value' => '[[TPLink%GPASS%TL-SL5428E | http://www.tp-link.com/en/products/details/?model=TL-SL5428E]]'),
+	2059 => array ('chapter_id' => 12, 'dict_value' => 'Cisco%GPASS%Catalyst 3560CG-8PC-S'),
+	2060 => array ('chapter_id' => 13, 'dict_value' => '[[RH Fedora%GSKIP%Fedora 18 | http://docs.fedoraproject.org/en-US/Fedora/18/html/Release_Notes/]]'),
+	2061 => array ('chapter_id' => 13, 'dict_value' => '[[RH Fedora%GSKIP%Fedora 19 | http://docs.fedoraproject.org/en-US/Fedora/19/html/Release_Notes/]]'),
+	2062 => array ('chapter_id' => 12, 'dict_value' => 'MikroTik%GPASS%CRS125-24G-1S-RM'),
 
-	// a hole here
+	// add new records here until the gap is filled
 
+	2076 => array ('chapter_id' => 2, 'dict_value' => '8P8C (RJ45)'),
+	2077 => array ('chapter_id' => 2, 'dict_value' => 'fiber SC'),
+	2078 => array ('chapter_id' => 2, 'dict_value' => 'fiber LC'),
+	2079 => array ('chapter_id' => 2, 'dict_value' => 'fiber FC'),
 	2080 => array ('chapter_id' => 14, 'dict_value' => 'Huawei VRP 5.11'),
 	2081 => array ('chapter_id' => 14, 'dict_value' => 'Huawei VRP 5.12'),
 	2082 => array ('chapter_id' => 14, 'dict_value' => 'Cisco IOS 15.1'),

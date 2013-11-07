@@ -916,6 +916,29 @@ function getOpLink ($params, $title,  $img_name = '', $comment = '', $class = ''
 	return $ret;
 }
 
+function getPopupLink ($helper, $params, $window_name = '', $img_name = '', $title = '', $comment = '', $class = '')
+{
+	$popup_args = 'height=700, width=700, location=no, menubar=no, resizable=yes, scrollbars=yes, status=no, titlebar=no, toolbar=no';
+	$ret = '<a href="#"';
+	$class = trim ($class);
+	if (! empty ($class))
+		$ret .= ' class="' . htmlspecialchars ($class, ENT_QUOTES) . '"';
+	if (! empty ($comment))
+		$ret .= 'title="' . htmlspecialchars ($comment, ENT_QUOTES) . '"';
+	$href = makeHrefForHelper ($helper, $params);
+	$ret .= " onclick=\"window.open('$href', '$window_name', '$popup_args'); return false\">";
+
+	if (! empty ($img_name))
+	{
+		$ret .= getImageHREF ($img_name, $comment);
+		if (! empty ($title))
+			$ret .= ' ';
+	}
+	$ret .= $title;
+	$ret .= '</a>';
+	return $ret;
+}
+
 function renderProgressBar ($percentage = 0, $theme = '', $inline = FALSE)
 {
 	echo getProgressBar ($percentage, $theme, $inline);
@@ -969,17 +992,23 @@ function getRenderedIPPortPair ($ip, $port = NULL)
 // Use special encoding for upload forms
 function printOpFormIntro ($opname, $extra = array(), $upload = FALSE)
 {
-	global $pageno, $tabno, $page;
-
-	echo "<form method=post id=${opname} name=${opname} action='?module=redirect&page=${pageno}&tab=${tabno}&op=${opname}'";
-	if ($upload)
-		echo " enctype='multipart/form-data'";
-	echo ">";
-	fillBypassValues ($pageno, $extra);
-	foreach ($extra as $inputname => $inputvalue)
-		printf ('<input type=hidden name="%s" value="%s">', htmlspecialchars ($inputname, ENT_QUOTES), htmlspecialchars ($inputvalue, ENT_QUOTES));
+	echo getOpFormIntro ($opname, $extra, $upload);
 }
 
+function getOpFormIntro ($opname, $extra = array(), $upload = FALSE)
+{
+	global $pageno, $tabno, $page;
+	$ret = '';
+
+	$ret = "<form method=post id=${opname} name=${opname} action='?module=redirect&page=${pageno}&tab=${tabno}&op=${opname}'";
+	if ($upload)
+		$ret .= " enctype='multipart/form-data'";
+	$ret .= ">";
+	fillBypassValues ($pageno, $extra);
+	foreach ($extra as $inputname => $inputvalue)
+		$ret .= sprintf ('<input type=hidden name="%s" value="%s">', htmlspecialchars ($inputname, ENT_QUOTES), htmlspecialchars ($inputvalue, ENT_QUOTES));
+	return $ret;
+}
 
 // Display hrefs for all of a file's parents. If scissors are requested,
 // prepend cutting button to each of them.
@@ -997,6 +1026,33 @@ function serializeFileLinks ($links, $scissors = FALSE)
 		$comma = '<br>';
 	}
 	return $ret;
+}
+
+// Returns the output of getNiftySelect() with port type options. All OIF options
+// for the default IIF will be shown, but only the default OIFs will be present
+// for each other IIFs. IIFs, for which there is no default OIF, will not
+// be listed.
+// This SELECT will be used for the "add new port" form.
+function getPortTypeSelect ($attrs)
+{
+	static $prefs;
+	if (! isset ($prefs))
+		$prefs = getPortListPrefs();
+
+	$ret = array();
+	foreach (getPortInterfaceCompat() as $row)
+	{
+		if (isset ($prefs['iif_picks'][$row['iif_id']]))
+			$optgroup = $row['iif_name'];
+		elseif (array_key_exists ($row['iif_id'], $prefs['oif_picks']) and $prefs['oif_picks'][$row['iif_id']] == $row['oif_id'])
+			$optgroup = 'other';
+		else
+			continue;
+		if (!array_key_exists ($optgroup, $ret))
+			$ret[$optgroup] = array();
+		$ret[$optgroup][$row['iif_id'] . '-' . $row['oif_id']] = $row['oif_name'];
+	}
+	return getNiftySelect ($ret, $attrs, $prefs['selected']);
 }
 
 ?>

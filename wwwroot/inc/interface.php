@@ -64,7 +64,7 @@ $CodePressMap = array
 (
 	'sql' => 'sql',
 	'php' => 'php',
-	'html' => 'html',
+	'html' => 'htmlmixed',
 	'css' => 'css',
 	'js' => 'javascript',
 );
@@ -281,12 +281,18 @@ function renderLocationFilterPortlet ()
 
 		foreach ($subtree as $location_id => $location)
 		{
-			echo "<tr><td class=tagbox style='padding-left: " . ($level * 16) . "px;'><label>";
+			echo "<div class=tagbox style='text-align:left; padding-left:" . ($level * 16) . "px;'>";
 			$checked = (in_array ($location['id'], $_SESSION['locationFilter'])) ? 'checked' : '';
 			echo "<label><input type=checkbox name='location_id[]' class=${level} value='${location['id']}'${checked} onClick=checkAll(this)>${location['name']}";
-			echo "</label></td></tr>\n";
+			echo '</label>';
 			if ($location['kidc'])
+			{
+				echo "<a id='lfa" . $location['id'] . "' onclick=\"expand('${location['id']}')\" href\"#\" > - </a>";
+				echo "<div id='lfd" . $location['id'] . "'>";
 				$self ($location['kids'], $level + 1);
+				echo '</div>';
+			}
+			echo '</div>';
 		}
 	}
 
@@ -296,7 +302,7 @@ function checkAll(bx) {
 		if (tbls[i].id == "locationFilter") {
 			var bxs=tbls[i].getElementsByTagName("input");
 			var in_tree = false;
-			for (var j=0; j<bxs.length; j++ ) {
+			for (var j=0; j<bxs.length; j++) {
 				if(in_tree == false && bxs[j].value == bx.value)
 					in_tree = true;
 				else if(parseInt(bxs[j].className) <= parseInt(bx.className))
@@ -305,6 +311,44 @@ function checkAll(bx) {
 					bxs[j].checked = bx.checked;
 			}
 		}
+}
+
+function collapseAll(bx) {
+	for (var tbls=document.getElementsByTagName("table"), i=tbls.length; i--;)
+		if (tbls[i].id == "locationFilter") {
+			var bxs=tbls[i].getElementsByTagName("div");
+			//loop through divs to hide unchecked
+			for (var j=0; j<bxs.length; j++) {
+				var is_checked = -1;
+				var in_div=bxs[j].getElementsByTagName("input");
+				//loop through input to find if any is checked
+				for (var k=0; k<in_div.length; k++) {
+					if(in_div[k].type="checkbox") {
+						if (in_div[k].checked == true) {
+							is_checked = true;
+							break;
+						}
+						else
+							is_checked = false;
+					}
+				}
+				// nothing selected and element id is lfd, collapse it
+				if (is_checked == false && !bxs[j].id.indexOf("lfd"))
+					expand(bxs[j].id.substr(3));
+			}
+		}
+}
+
+function expand(id) {
+	var divid = document.getElementById("lfd" + id);
+	var iconid = document.getElementById("lfa" + id);
+	if (divid.style.display == 'none') {
+		divid.style.display = 'block';
+		iconid.innerHTML = ' - ';
+	} else {
+		divid.style.display = 'none';
+		iconid.innerHTML = ' + ';
+	}
 }
 END
 	,TRUE);
@@ -322,11 +366,12 @@ END;
 	{
 		echo "<tr><td class=tagbox style='padding-left: 0px'><label>";
 		echo "<input type=checkbox name='location'  onClick=checkAll(this)> Toggle all";
+		echo "<img src=pix/1x1t.gif onLoad=collapseAll(this)>"; // dirty hack to collapse all when page is displayed
 		echo "</label></td></tr>\n";
-		echo "<tr><td class=tagbox><hr></td></tr>\n";
+		echo "<tr><td class=tagbox><hr>\n";
 		renderLocationCheckbox (treeFromList ($locationlist));
-		echo "<tr><td class=tagbox><hr></td></tr>\n";
-		echo "<tr><td>";
+		echo "<hr></td></tr>\n";
+		echo '<tr><td>';
 		printImageHREF ('setfilter', 'set filter', TRUE);
 		echo "</td></tr>\n";
 	}
@@ -491,19 +536,17 @@ function renderLocationSelectTree ($selected_id = NULL)
 
 function renderRackspaceLocationEditor ()
 {
-	addJS
-	(
-<<<END
-function locationeditor_showselectbox(e) {
-	$(this).load('index.php', {module: 'ajax', ac: 'get-location-select', locationid: this.id});
-	$(this).unbind('mousedown', locationeditor_showselectbox);
-}
-$(document).ready(function () {
-	$('select.locationlist-popup').bind('mousedown', locationeditor_showselectbox);
-});
-END
-		, TRUE
-	);
+	$js = <<<JSTXT
+	function locationeditor_showselectbox(e) {
+		$(this).load('index.php', {module: 'ajax', ac: 'get-location-select', locationid: this.id});
+		$(this).unbind('mousedown', locationeditor_showselectbox);
+	}
+	$(document).ready(function () {
+		$('select.locationlist-popup').bind('mousedown', locationeditor_showselectbox);
+	});
+JSTXT;
+
+	addJS($js, TRUE	);
 	function printNewItemTR ()
 	{
 		printOpFormIntro ('addLocation');
@@ -640,7 +683,7 @@ function printObjectDetailsForRenderRack ($object_id, $hl_obj_id = 0)
 		$body = ", visible label is \"${objectData['label']}\"";
 	// Display list of child objects, if any
 	$objectChildren = getEntityRelatives ('children', 'object', $objectData['id']);
-	$slotInfo = $slotData = $slotTitle = array ();
+	$slotRows = $slotCols = $slotInfo = $slotData = $slotTitle = array ();
 	if (count($objectChildren) > 0)
 	{
 		foreach ($objectChildren as $child)
@@ -648,9 +691,23 @@ function printObjectDetailsForRenderRack ($object_id, $hl_obj_id = 0)
 			$childNames[] = $child['name'];
 			$childData = spotEntity ('object', $child['entity_id']);
 			$attrData = getAttrValues ($child['entity_id']);
+			$numRows = $numCols = 1;
+			if (isset ($attrData[2])) // HW type
+			{
+				extractLayout ($attrData[2]);
+				if (isset ($attrData[2]['rows']))
+				{
+					$numRows = $attrData[2]['rows'];
+					$numCols = $attrData[2]['cols'];
+				}
+			}
 			if (isset ($attrData['28'])) // slot number
 			{
 				$slot = $attrData['28']['value'];
+				if (preg_match ('/\d+/', $slot, $matches))
+					$slot = $matches[0];
+				$slotRows[$slot] = $numRows;
+				$slotCols[$slot] = $numCols;
 				$slotInfo[$slot] = $child['name'];
 				$slotData[$slot] = $child['entity_id'];
 				if (strlen ($childData['asset_no']))
@@ -688,19 +745,34 @@ function printObjectDetailsForRenderRack ($object_id, $hl_obj_id = 0)
 						$s = ($r * $cols) + $c + 1;
 						if (isset ($slotData[$s]))
 						{
-							echo "<td class='state_T";
-							if ($slotData[$s] == $hl_obj_id)
-								echo 'h';
-							echo "'>${slotTitle[$s]}";
-							if ($layout == 'V')
+							if ($slotData[$s] >= 0)
 							{
-								$tmp = substr ($slotInfo[$s], 0, 1);
-								foreach (str_split (substr ($slotInfo[$s],1)) as $letter)
-									$tmp .= '<br>' . $letter;
-								$slotInfo[$s] = $tmp;
+								for ($lr = 0; $lr < $slotRows[$s]; $lr++)
+									for ($lc = 0; $lc < $slotCols[$s]; $lc++)
+									{
+										$skip = ($lr * $cols) + $lc;
+										if ($skip > 0)
+											$slotData[$s + $skip] = -1;
+									}
+								echo '<td';
+								if ($slotRows[$s] > 1)
+									echo " rowspan=$slotRows[$s]";
+								if ($slotCols[$s] > 1)
+									echo " colspan=$slotCols[$s]";
+								echo " class='state_T";
+								if ($slotData[$s] == $hl_obj_id)
+									echo 'h';
+								echo "'>${slotTitle[$s]}";
+								if ($layout == 'V')
+								{
+									$tmp = substr ($slotInfo[$s], 0, 1);
+									foreach (str_split (substr ($slotInfo[$s], 1)) as $letter)
+										$tmp .= '<br>' . $letter;
+									$slotInfo[$s] = $tmp;
+								}
+								echo mkA ($slotInfo[$s], 'object', $slotData[$s]);
+								echo '</div></td>';
 							}
-							echo mkA ($slotInfo[$s], 'object', $slotData[$s]);
-							echo '</div></td>';
 						}
 						else
 							echo "<td class='state_F'><div title=\"Free slot\">&nbsp;</div></td>";
@@ -794,27 +866,24 @@ function renderRack ($rack_id, $hl_obj_id = 0)
 
 function renderRackSortForm ($row_id)
 {
-	includeJQueryUI (FALSE);
-	addJS
-	(
-<<<END
-  $(document).ready(
-    function () {
-      $("#sortRacks").sortable({
-        update : function () {
-          serial = $('#sortRacks').sortable('serialize');
-          $.ajax({
-            url: 'index.php?module=ajax&ac=upd-rack-sort-order',
-            type: 'post',
-            data: serial,
-          });
-        }
-      });
-    }
-  );
-END
-		, TRUE
+	includeJQueryUI (false);
+	$js = <<<JSTXT
+	$(document).ready(
+		function () {
+			$("#sortRacks").sortable({
+				update : function () {
+					serial = $('#sortRacks').sortable('serialize');
+					$.ajax({
+						url: 'index.php?module=ajax&ac=upd-rack-sort-order',
+						type: 'post',
+						data: serial,
+					});
+				}
+			});
+		}
 	);
+JSTXT;
+	addJS($js, true);
 
 	startPortlet ('Racks');
 	echo "<table border=0 cellspacing=0 cellpadding=5 align=center class=widetable>\n";
@@ -903,14 +972,8 @@ function renderEditObjectForm()
 		}
 		echo "<tr><td>&nbsp;</td>";
 		echo "<th class=tdright>Select container:</th><td class=tdleft>";
-		echo "<span";
-		$helper_args = array ('object_id' => $object_id);
-		$popup_args = 'height=700, width=400, location=no, menubar=no, '.
-			'resizable=yes, scrollbars=yes, status=no, titlebar=no, toolbar=no';
-		echo " onclick='window.open(\"" . makeHrefForHelper ('objlist', $helper_args);
-		echo "\",\"findlink\",\"${popup_args}\");'>";
-		printImageHREF ('attach', 'Select a container');
-		echo "</span></td></tr>\n";
+		echo getPopupLink ('objlist', array ('object_id' => $object_id), 'findlink', 'attach', 'Select a container');
+		echo "</td></tr>\n";
 	}
 	// optional attributes
 	$i = 0;
@@ -989,8 +1052,11 @@ function renderEditRackForm ($rack_id)
 	echo '<table border=0 align=center>';
 	echo "<tr><td>&nbsp;</td><th class=tdright>Rack row:</th><td class=tdleft>";
 	foreach (getAllRows () as $row_id => $rowInfo)
-		$rows[$row_id] = $rowInfo['name'];
-    natcasesort ($rows);
+	{
+		$trail = getLocationTrail ($rowInfo['location_id'], FALSE);
+		$rows[$row_id] = empty ($trail) ? $rowInfo['name'] : $rowInfo['name'] . ' [' . $trail . ']';
+	}
+	natcasesort ($rows);
 	printSelect ($rows, array ('name' => 'row_id'), $rack['row_id']);
 	echo "</td></tr>\n";
 	echo "<tr><td>&nbsp;</td><th class=tdright>Name (required):</th><td class=tdleft><input type=text name=name value='${rack['name']}'></td></tr>\n";
@@ -1059,7 +1125,7 @@ function renderEditRackForm ($rack_id)
 function renderRackInfoPortlet ($rackData)
 {
 	$summary = array();
-	$summary['Rack row'] = $rackData['row_name'];
+	$summary['Rack row'] = mkA ($rackData['row_name'], 'row', $rackData['row_id']);
 	$summary['Name'] = $rackData['name'];
 	$summary['Height'] = $rackData['height'];
 	if (strlen ($rackData['asset_no']))
@@ -1128,27 +1194,36 @@ function renderRackProblems ($rack_id)
 
 function renderObjectPortRow ($port, $is_highlighted)
 {
-	echo '<tr';
-	if ($is_highlighted)
-		echo ' class=highlight';
+	$tr_class = $is_highlighted ? 'class=highlight' : '';
+	echo "<tr $tr_class>";
 	$a_class = isEthernetPort ($port) ? 'port-menu' : '';
-	echo "><td class='tdleft' NOWRAP><a name='port-${port['id']}' class='ancor interactive-portname nolink $a_class'>${port['name']}</a></td>";
+	echo "<td class='tdleft' NOWRAP><a name='port-${port['id']}' class='ancor interactive-portname nolink $a_class'>${port['name']}</a></td>";
 	echo "<td class=tdleft>${port['label']}</td>";
 	echo "<td class=tdleft>" . formatPortIIFOIF ($port) . "</td><td class=tdleft><tt>${port['l2address']}</tt></td>";
-	if ($port['remote_object_id'])
+	$sep = '';
+	$cableid_editable = permitted ('object', 'ports', 'editPort')? 'editable' : '';
+	$trace_link = '&nbsp;' . getPopupLink ('traceroute', array ('port' => $port['id']), 'findlink', 'find', '', 'Trace this port');
+
+	// display links, if persist (first - L2, then - L1)
+	$links = $port['l1_links'];
+	if ($port['linked'])
+		array_unshift ($links, $port);
+	foreach ($links as $linkinfo)
 	{
-		echo "<td class=tdleft>" .
-			formatPortLink ($port['remote_object_id'], $port['remote_object_name'], $port['remote_id'], NULL) .
-			"</td>";
-		echo "<td class=tdleft>" . formatLoggedSpan ($port['last_log'], $port['remote_name'], 'underline') . "</td>";
-		$editable = permitted ('object', 'ports', 'editPort')
-			? 'editable'
-			: '';
-		echo "<td class=tdleft><span class='rsvtext $editable id-${port['id']} op-upd-reservation-cable'>${port['cableid']}</span></td>";
+		echo $sep;
+		$sep = "</tr><tr $tr_class><td colspan=4></td>";
+		echo '<td class=tdleft>'.formatLoggedSpan ($port['last_log'], ($linkinfo['remote_object_id'] == $port['object_id'] ? 'loopback' : formatPortLink ($linkinfo['remote_object_id'], $linkinfo['remote_object_name'], $linkinfo['remote_id'], NULL))).'</td>';
+		echo '<td class=tdleft>'.formatLoggedSpan ($port['last_log'], $linkinfo['remote_name'], 'underline') . (isset ($linkinfo['linked']) ? '' : $trace_link) . '</td>';
+		echo "<td class=tdleft><span class='rsvtext $cableid_editable id-".$linkinfo['link_id']." op-upd-reservation-cable'>".$linkinfo['cableid'].'</span></td>';
 	}
-	else
+
+	// display port reservation comment, if persists
+	if (! isset ($linkinfo) || strlen ($port['reservation_comment']))
+	{
+		echo $sep;
 		echo implode ('', formatPortReservation ($port)) . '<td></td>';
-	echo "</tr>";
+	}
+	echo "</tr>\n";
 }
 
 function renderObject ($object_id)
@@ -1217,7 +1292,7 @@ function renderObject ($object_id)
 			)
 		)."&"
 	));
-	renderEntitySummary ($info, 'summary', $summary);
+	renderEntitySummary ($info, 'Summary', $summary);
 
 	if (strlen ($info['comment']))
 	{
@@ -1249,7 +1324,7 @@ function renderObject ($object_id)
 
 	if (count ($info['ports']))
 	{
-		startPortlet ('ports and links');
+		startPortlet ('Ports and links');
 		$hl_port_id = 0;
 		if (isset ($_REQUEST['hl_port_id']))
 		{
@@ -1257,11 +1332,12 @@ function renderObject ($object_id)
 			$hl_port_id = $_REQUEST['hl_port_id'];
 			addAutoScrollScript ("port-$hl_port_id");
 		}
-		echo "<table cellspacing=0 cellpadding='5' align='center' class='widetable'>";
+		echo getPopupLink ('traceroute', array ('object_id' => $object_id), 'findlink', 'find', 'Trace all port links');
+		echo "<table border=0 cellspacing=0 cellpadding='5' align='center' class='widetable'>";
 		echo '<tr><th class=tdleft>Local name</th><th class=tdleft>Visible label</th>';
 		echo '<th class=tdleft>Interface</th><th class=tdleft>L2 address</th>';
 		echo '<th class=tdcenter colspan=2>Remote object and port</th>';
-		echo '<th class=tdleft>Cable ID</th></tr>';
+		echo "<th class=tdleft>Cable ID</th></tr>\n";
 		foreach ($info['ports'] as $port)
 			callHook ('renderObjectPortRow', $port, ($hl_port_id == $port['id']));
 		if (permitted (NULL, 'ports', 'set_reserve_comment'))
@@ -1395,7 +1471,11 @@ function renderRackMultiSelect ($sname, $racks, $selected)
 	$rdata = array();
 	foreach ($racks as $rack)
 	{
-		$row_name = ($rack['location_id']) ? $rack['location_name'] . '/' . $rack['row_name'] : $rack['row_name'];
+		$trail = getLocationTrail ($rack['location_id'], FALSE);
+		if(!empty ($trail))
+			$row_name = $trail . ' : ' . $rack['row_name'];
+		else
+			$row_name = $rack['row_name'];
 		$rdata[$row_name][$rack['id']] = $rack['name'];
 	}
 	echo "<select name=${sname} multiple size=" . getConfigVar ('MAXSELSIZE') . " onchange='getElementsByName(\"updateObjectAllocation\")[0].submit()'>\n";
@@ -1418,15 +1498,14 @@ function renderRackMultiSelect ($sname, $racks, $selected)
 // This function renders a form for port edition.
 function renderPortsForObject ($object_id)
 {
-	$prefs = getPortListPrefs();
-	function printNewItemTR ($prefs)
+	function printNewItemTR()
 	{
 		printOpFormIntro ('addPort');
 		echo "<tr><td>";
 		printImageHREF ('add', 'add a port', TRUE);
 		echo "</td><td class='tdleft'><input type=text size=8 name=port_name tabindex=100></td>\n";
-		echo "<td><input type=text name=port_label tabindex=101></td><td>";
-		printNiftySelect (getNewPortTypeOptions(), array ('name' => 'port_type_id', 'tabindex' => 102), $prefs['selected']);
+		echo "<td><input type=text name=port_label tabindex=101></td><td class=tdleft>";
+		echo getPortTypeSelect (array ('name' => 'port_type_id', 'tabindex' => 102));
 		echo "<td><input type=text name=port_l2address tabindex=103 size=18 maxlength=24></td>\n";
 		echo "<td colspan=4>&nbsp;</td><td>";
 		printImageHREF ('add', 'add a port', TRUE, 104);
@@ -1447,23 +1526,14 @@ function renderPortsForObject ($object_id)
 		printImageHREF ('add', 'add ports', TRUE);
 		echo "</td><td><input type=text size=8 name=port_name tabindex=105></td>\n";
 		echo "<td><input type=text name=port_label tabindex=106></td><td>";
-		printNiftySelect (getNewPortTypeOptions(), array ('name' => 'port_type_id', 'tabindex' => 107), $prefs['selected']);
+		echo getPortTypeSelect (array ('name' => 'port_type_id', 'tabindex' => 107));
 		echo "<td><input type=text name=port_numbering_start tabindex=108 size=3 maxlength=3></td>\n";
 		echo "<td><input type=text name=port_numbering_count tabindex=109 size=3 maxlength=3></td>\n";
-		echo "<td>&nbsp;</td><td>";
+		echo "<td>";
 		printImageHREF ('add', 'add ports', TRUE, 110);
 		echo "</td></tr></form>";
 		echo "</table><br>\n";
 	}
-
-	echo "<table cellspacing=0 cellpadding='5' align='center' class='widetable'>\n";
-	echo "<tr><th>&nbsp;</th><th class=tdleft>Local name</th><th class=tdleft>Visible label</th><th class=tdleft>Interface</th><th class=tdleft>L2 address</th>";
-	echo "<th class=tdcenter colspan=2>Remote object and port</th><th>Cable ID</th><th class=tdcenter>(Un)link or (un)reserve</th><th>&nbsp;</th></tr>\n";
-	if (getConfigVar ('ADDNEW_AT_TOP') == 'yes')
-		printNewItemTR ($prefs);
-
-	// clear ports link
-	echo getOpLink (array ('op'=>'deleteAll'), 'Clear port list', 'clear', '', 'need-confirmation');
 
 	if (isset ($_REQUEST['hl_port_id']))
 	{
@@ -1472,78 +1542,167 @@ function renderPortsForObject ($object_id)
 		addAutoScrollScript ("port-$hl_port_id");
 	}
 	switchportInfoJS ($object_id); // load JS code to make portnames interactive
-	foreach ($object['ports'] as $port)
-	{
-		$tr_class = isset ($hl_port_id) && $hl_port_id == $port['id'] ? 'class="highlight"' : '';
-		printOpFormIntro ('editPort', array ('port_id' => $port['id']));
-		echo "<tr $tr_class><td><a name='port-${port['id']}' href='".makeHrefProcess(array('op'=>'delPort', 'port_id'=>$port['id']))."'>";
-		printImageHREF ('delete', 'Unlink and Delete this port');
-		echo "</a></td>\n";
-		$a_class = isEthernetPort ($port) ? 'port-menu' : '';
-		echo "<td class='tdleft' NOWRAP><input type=text name=name class='interactive-portname $a_class' value='${port['name']}' size=8></td>";
-		echo "<td><input type=text name=label value='${port['label']}'></td>";
-		echo '<td>';
-		if ($port['iif_id'] != 1)
-			echo '<label>' . $port['iif_name'] . ' ';
-		printSelect (getExistingPortTypeOptions ($port['id']), array ('name' => 'port_type_id'), $port['oif_id']);
-		if ($port['iif_id'] != 1)
-			echo '</label>';
-		echo '</td>';
 
-		// 18 is enough to fit 6-byte MAC address in its longest form,
-		// while 24 should be Ok for WWN
-		echo "<td><input type=text name=l2address value='${port['l2address']}' size=18 maxlength=24></td>\n";
-		if ($port['remote_object_id'])
-		{
-			echo "<td>" .
-				formatLoggedSpan ($port['last_log'], formatPortLink ($port['remote_object_id'], $port['remote_object_name'], $port['remote_id'], NULL)) .
-				"</td>";
-			echo "<td> " . formatLoggedSpan ($port['last_log'], $port['remote_name'], 'underline') .
-				"<input type=hidden name=reservation_comment value=''></td>";
-			echo "<td><input type=text name=cable value='${port['cableid']}'></td>";
-			echo "<td class=tdcenter>";
-			echo getOpLink (array('op'=>'unlinkPort', 'port_id'=>$port['id'], ), '', 'cut', 'Unlink this port');
-			echo "</td>";
-		}
-		elseif (strlen ($port['reservation_comment']))
-		{
-			echo "<td>" . formatLoggedSpan ($port['last_log'], 'Reserved:', 'strong underline') . "</td>";
-			echo "<td><input type=text name=reservation_comment value='${port['reservation_comment']}'></td>";
-			echo "<td></td>";
-			echo "<td class=tdcenter>";
-			echo getOpLink (array('op'=>'useup', 'port_id'=>$port['id']), '', 'clear', 'Use up this port');
-			echo "</td>";
-		}
-		else
-		{
-			$in_rack = getConfigVar ('NEAREST_RACKS_CHECKBOX');
-			echo "<td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td class=tdcenter><span";
-			$helper_args = array
-			(
-				'port' => $port['id'],
-				'in_rack' => ($in_rack == "yes" ? "on" : "")
-			);
-			$popup_args = 'height=700, width=400, location=no, menubar=no, '.
-				'resizable=yes, scrollbars=yes, status=no, titlebar=no, toolbar=no';
-			echo " ondblclick='window.open(\"" . makeHrefForHelper ('portlist', $helper_args);
-			echo "\",\"findlink\",\"${popup_args}\");'";
-			// end of onclick=
-			echo " onclick='window.open(\"" . makeHrefForHelper ('portlist', $helper_args);
-			echo "\",\"findlink\",\"${popup_args}\");'";
-			// end of onclick=
-			echo '>';
-			// end of <a>
-			printImageHREF ('plug', 'Link this port');
-			echo "</span>";
-			echo " <input type=text name=reservation_comment></td>\n";
-		}
-		echo "<td>";
-		printImageHREF ('save', 'Save changes', TRUE);
-		echo "</td></form></tr>\n";
+	// clear ports link
+	echo getOpLink (array ('op'=>'deleteAll'), 'Clear port list', 'clear', 'Delete all existing ports', 'need-confirmation');
+
+	// link patch panels link
+	if ($object['objtype_id'] == 9)
+	{
+		echo '<span style="margin-left: 2em">';
+		echo getPopupLink ('patchpanellist', array ('object_id' => $object_id), 'findlink', 'plug', 'Link to another patch panel');
+		echo '</span>';
 	}
+
+	echo '<span style="margin-left: 2em">';
+	echo getPopupLink ('traceroute', array ('object_id' => $object_id), 'findlink', 'find', 'Trace all port links');
+	echo '</span>';
+
+	echo "<table border=0 cellspacing=0 cellpadding='5' align='center' class='widetable'>\n";
+	echo "<tr>";
+	// table columns below:
+	echo "<th>&nbsp;</th>"; // add/remove port button
+	echo "<th class=tdleft>Local name</th>";
+	echo "<th class=tdleft>Visible label</th>";
+	echo "<th class=tdleft>Interface</th>";
+	echo "<th class=tdleft>L2 address</th>";
+	echo "<th class=tdleft colspan=2>Remote object and port";
+	echo "</th>";
+	echo "<th class=tdleft>Cable ID</th>";
+	echo "<th class=tdleft>(Un)link or (un)reserve</th>";
+	echo "<th>&nbsp;</th>"; // add/save port button
+
+	echo "</tr>\n";
+	if (getConfigVar ('ADDNEW_AT_TOP') == 'yes')
+		printNewItemTR ();
+
+	$in_rack = getConfigVar ('NEAREST_RACKS_CHECKBOX');
+	foreach ($object['ports'] as $portinfo)
+	{
+		$tr_class = isset ($hl_port_id) && $hl_port_id == $portinfo['id'] ? 'class="highlight"' : '';
+		$reserved = (0 != strlen ($portinfo['reservation_comment']));
+		$link_helper_args = array
+		(
+			'port' => $portinfo['id'],
+			'in_rack' => ($in_rack == "yes" ? "on" : ""),
+		);
+
+		// prepare $links array (l2 and l1 links merged together, having 'linked' set to 0, 'L1' or 'L2')
+		$links = array();
+		$linkinfo = $portinfo;
+		if ($portinfo['linked'])
+		{
+			$linkinfo['linked'] = 'L2';
+			$links[] = $linkinfo;
+		}
+		foreach ($portinfo['l1_links'] as $linkinfo)
+		{
+			$linkinfo['linked'] = 'L1';
+			$links[] = array_merge ($portinfo, $linkinfo);
+		}
+		if (! $links)
+			$links[] = $portinfo;
+
+		$first_row = TRUE;
+		for ($i = 0; $i < count ($links); $i++)
+		{
+			$port = $links[$i];
+			if ($first_row)
+			{
+				$params = array ('port_id' => $port['id']);
+				if (isset ($port['link_id']))
+					$params['link_id'] = $port['link_id'];
+				printOpFormIntro ('editPort', $params);
+			}
+			else
+				printOpFormIntro ('editLink', array ('link_id' => $port['link_id']));
+			echo "<tr $tr_class>";
+
+			if ($port['linked'] === 'L1' && !$first_row)
+				// 1-5. Empty cells
+				echo "<td colspan=5></td>";
+			else
+			{
+				// 1. add/remove port button
+				echo "<td><a name='port-${port['id']}' href='".makeHrefProcess(array('op'=>'delPort', 'port_id'=>$port['id']))."'>";
+				printImageHREF ('delete', 'Unlink and Delete this port');
+				echo "</a></td>";
+
+				// 2. Local name
+				$a_class = isEthernetPort ($port) ? 'port-menu' : '';
+				echo "<td class='tdleft' NOWRAP><input type=text name=name class='interactive-portname $a_class' value='${port['name']}' size=8></td>";
+
+				// 3. Visible label
+				echo "<td><input type=text name=label value='${port['label']}'></td>";
+
+				// 4. Interface type
+				echo "<td class='tdleft'><label>";
+				echo formatPortIIFOIF ($port, ' ', getSelect (getExistingPortTypeOptions ($port), array ('name' => 'port_type_id'), $port['oif_id']));
+				echo '</label></td>';
+
+				// 5. L2 address
+				// 18 is enough to fit 6-byte MAC address in its longest form,
+				// while 24 should be Ok for WWN
+				echo "<td><input type=text name=l2address value='${port['l2address']}' size=18 maxlength=24></td>\n";
+			}
+
+			// 6. Remote object
+			echo '<td>';
+			if ($first_row && $port['linked'] !== 'L2' && $reserved)
+				echo formatLoggedSpan ($port['last_log'], 'Reserved:', 'strong underline');
+			elseif ($port['linked'])
+				echo formatLoggedSpan ($port['last_log'], ($port['remote_object_id'] == $object['id'] ? 'loopback' : formatPortLink ($port['remote_object_id'], $port['remote_object_name'], $port['remote_id'], NULL)));
+			echo '</td>';
+
+			// 7. Remote port
+			echo '<td>';
+			if ($first_row && $port['linked'] !== 'L2' && $reserved)
+				echo '<input type=text name=reservation_comment value="' . htmlspecialchars ($port['reservation_comment'], ENT_QUOTES) . '">';
+			elseif ($port['linked'])
+			{
+				echo '&nbsp;' . formatLoggedSpan ($port['last_log'], $port['remote_name'], 'underline');
+				if ($port['linked'] === 'L1')
+					echo '&nbsp;' . getPopupLink ('traceroute', array ('port' => $port['id']), 'findlink', 'find', '', 'Trace this port');
+			}
+			echo '</td>';
+
+			// 8. Cable id
+			echo '<td>';
+			if ($port['linked'] && ! ($first_row && $port['linked'] !== 'L2'))
+				echo '<input type=text name=cable value="' . htmlspecialchars ($port['cableid'], ENT_QUOTES) . '">';
+			echo '</td>';
+
+			// 9. (Un)link or (un)reserve
+			echo '<td class="port-btns tdleft">';
+			if ($first_row)
+				echo getPopupLink ('portlist', $link_helper_args, 'findlink', 'plug', '', 'Link this port');
+			if ($first_row && $port['linked'] !== 'L2' && $reserved)
+				echo getOpLink (array('op'=>'useup', 'port_id'=>$port['id']), '', 'clear', 'Use up this port');
+			if ($port['linked'])
+				echo getOpLink (array ('op'=>'unlinkPort', 'link_id'=>$port['link_id']), '', 'cut', 'Unlink this port');
+			if ($first_row && $port['linked'] !== 'L2' && !$reserved)
+				echo '<input type=text name=reservation_comment>';
+			elseif (! ($first_row && $port['linked'] !== 'L2' && $reserved))
+				echo '<input type=hidden name=reservation_comment value="">';
+			echo '</td>';
+
+			// 10. add/save port button
+			echo '<td>';
+			printImageHREF ('save', 'Save changes', TRUE);
+			echo '</td>';
+
+			echo '</tr></form>';
+
+			if ($first_row && $reserved && $port['linked'] === 'L1')
+				$i--; // reservation field occupied one line, we need to process the current link again
+			$first_row = FALSE;
+		} // $links loop
+	} // ports loop
+
 	if (getConfigVar ('ADDNEW_AT_TOP') != 'yes')
-		printNewItemTR ($prefs);
+		printNewItemTR();
 	echo "</table><br>\n";
+
 	if (getConfigVar ('ADDNEW_AT_TOP') != 'yes' && getConfigVar('ENABLE_BULKPORT_FORM') == 'yes'){
 		echo "<table cellspacing=0 cellpadding='5' align='center' class='widetable'>\n";
 		echo "<tr><th>&nbsp;</th><th class=tdleft>Local name</th><th class=tdleft>Visible label</th><th class=tdleft>Interface</th><th class=tdleft>Start Number</th>";
@@ -1553,7 +1712,7 @@ function renderPortsForObject ($object_id)
 		printImageHREF ('add', 'add ports', TRUE);
 		echo "</td><td><input type=text size=8 name=port_name tabindex=105></td>\n";
 		echo "<td><input type=text name=port_label tabindex=106></td><td>";
-		printNiftySelect (getNewPortTypeOptions(), array ('name' => 'port_type_id', 'tabindex' => 107), $prefs['selected']);
+		echo getPortTypeSelect (array ('name' => 'port_type_id', 'tabindex' => 107));
 		echo "<td><input type=text name=port_numbering_start tabindex=108 size=3 maxlength=3></td>\n";
 		echo "<td><input type=text name=port_numbering_count tabindex=109 size=3 maxlength=3></td>\n";
 		echo "<td>&nbsp;</td><td>";
@@ -1561,25 +1720,25 @@ function renderPortsForObject ($object_id)
 		echo "</td></tr></form>";
 		echo "</table><br>\n";
 	}
-	if (getConfigVar('ENABLE_MULTIPORT_FORM') == 'yes')
-		finishPortlet();
-	if (getConfigVar('ENABLE_MULTIPORT_FORM') != 'yes')
-		return;
-
-	startPortlet ('Add/update multiple ports');
-	printOpFormIntro ('addMultiPorts');
-	echo 'Format: <select name=format tabindex=201>';
-	echo '<option value=c3600asy>Cisco 3600 async: sh line | inc TTY</option>';
-	echo '<option value=fiwg selected>Foundry ServerIron/FastIron WorkGroup/Edge: sh int br</option>';
-	echo '<option value=fisxii>Foundry FastIron SuperX/II4000: sh int br</option>';
-	echo '<option value=ssv1>SSV:&lt;interface name&gt; &lt;MAC address&gt;</option>';
-	echo "</select>";
-	echo 'Default port type: ';
-	printNiftySelect (getNewPortTypeOptions(), array ('name' => 'port_type', 'tabindex' => 202), $prefs['selected']);
-	echo "<input type=submit value='Parse output' tabindex=204><br>\n";
-	echo "<textarea name=input cols=100 rows=50 tabindex=203></textarea><br>\n";
-	echo '</form>';
 	finishPortlet();
+
+	if (getConfigVar('ENABLE_MULTIPORT_FORM') == 'yes')
+	{
+		startPortlet ('Add/update multiple ports');
+		printOpFormIntro ('addMultiPorts');
+		echo 'Format: <select name=format tabindex=201>';
+		echo '<option value=c3600asy>Cisco 3600 async: sh line | inc TTY</option>';
+		echo '<option value=fiwg selected>Foundry ServerIron/FastIron WorkGroup/Edge: sh int br</option>';
+		echo '<option value=fisxii>Foundry FastIron SuperX/II4000: sh int br</option>';
+		echo '<option value=ssv1>SSV:&lt;interface name&gt; &lt;MAC address&gt;</option>';
+		echo "</select>";
+		echo 'Default port type: ';
+		echo getPortTypeSelect (array ('name' => 'port_type', 'tabindex' => 202));
+		echo "<input type=submit value='Parse output' tabindex=204><br>\n";
+		echo "<textarea name=input cols=100 rows=50 tabindex=203></textarea><br>\n";
+		echo '</form>';
+		finishPortlet();
+	}
 }
 
 function renderIPForObject ($object_id)
@@ -1980,7 +2139,9 @@ function renderRackSpaceForObject ($object_id)
 	// reflect the former state of the grid in current form.
 	echo "<td class=pcright rowspan=2 height='1%'>";
 	startPortlet ('Working copy');
+	includeJQueryUI (false);
 	addJS ('js/racktables.js');
+	addJS ('js/bulkselector.js');
 	echo '<table border=0 cellspacing=10 align=center><tr>';
 	foreach ($workingRacksData as $rack_id => $rackData)
 	{
@@ -1993,7 +2154,7 @@ function renderRackSpaceForObject ($object_id)
 			mergeGridFormToRack ($rackData);
 		echo "<td valign=top>";
 		echo "<center>\n<h2>${rackData['name']}</h2>\n";
-		echo "<table class=rack border=0 cellspacing=0 cellpadding=1>\n";
+		echo "<table class=rack id=selectableRack border=0 cellspacing=0 cellpadding=1>\n";
 		echo "<tr><th width='10%'>&nbsp;</th>";
 		echo "<th width='20%'><a href='javascript:;' onclick=\"toggleColumnOfAtoms('${rack_id}', '0', ${rackData['height']})\">Front</a></th>";
 		echo "<th width='50%'><a href='javascript:;' onclick=\"toggleColumnOfAtoms('${rack_id}', '1', ${rackData['height']})\">Interior</a></th>";
@@ -3064,10 +3225,7 @@ function renderNATv4ForObject ($object_id)
 
 		echo "</select>:<input type='text' name='localport' size='4' tabindex=2></td>";
 		echo "<td><input type='text' name='remoteip' id='remoteip' size='10' tabindex=3>";
-		echo "<a href='javascript:;' onclick='window.open(\"" . makeHrefForHelper ('inet4list');
-		echo "\", \"findobjectip\", \"height=700, width=400, location=no, menubar=no, resizable=yes, scrollbars=no, status=no, titlebar=no, toolbar=no\");'>";
-		printImageHREF ('find', 'Find object');
-		echo "</a>";
+		echo getPopupLink ('inet4list', array(), 'findobjectip', 'find', 'Find object');
 		echo ":<input type='text' name='remoteport' size='4' tabindex=4></td><td></td>";
 		echo "<td colspan=1><input type='text' name='description' size='20' tabindex=5></td><td>";
 		printImageHREF ('add', 'Add new NAT rule', TRUE, 6);
@@ -4769,12 +4927,22 @@ function renderLivePTR ($id)
 function renderAutoPortsForm ($object_id)
 {
 	$info = spotEntity ('object', $object_id);
+	$iiflist = getPortIIFOptions();
 	$ptlist = readChapter (CHAP_PORTTYPE, 'a');
 	echo "<table class='widetable' border=0 cellspacing=0 cellpadding=5 align='center'>\n";
 	echo "<caption>The following ports can be quickly added:</caption>";
 	echo "<tr><th>type</th><th>name</th></tr>";
 	foreach (getAutoPorts ($info['objtype_id']) as $autoport)
-		echo "<tr><td>" . $ptlist[$autoport['type']] . "</td><td>${autoport['name']}</td></tr>";
+	{
+		if (! preg_match ('/^(?:(\d+)-)?(\d+)$/', $autoport['type'], $m))
+			continue;
+		$iif_id = isset ($m[1]) ? $m[1] : 1;
+		$oif_id = $m[2];
+		$fmt_type = $ptlist[$oif_id];
+		if ($iif_id != 1 && $iif_id != 0)
+			$fmt_type = $iiflist[$iif_id] . ' / ' . $fmt_type;
+		echo "<tr><td>${fmt_type}</td><td>${autoport['name']}</td></tr>";
+	}
 	printOpFormIntro ('generate');
 	echo "<tr><td colspan=2 align=center>";
 	echo "<input type=submit value='Generate'>";
@@ -5264,14 +5432,16 @@ function renderRackCodeViewer ()
 
 function renderRackCodeEditor ()
 {
-	addJS ('js/codepress/codepress.js');
+	addJS ('js/codemirror/codemirror.js');
+	addJS ('js/codemirror/rackcode.js');
+	addCSS ('js/codemirror/codemirror.css');
 	addJS (<<<ENDJAVASCRIPT
 function verify()
 {
 	$.ajax({
 		type: "POST",
 		url: "index.php",
-		data: {'module': 'ajax', 'ac': 'verifyCode', 'code': $(RCTA).getCode()},
+		data: {'module': 'ajax', 'ac': 'verifyCode', 'code': $("#RCTA").text()},
 		success: function (data)
 		{
 			arr = data.split("\\n");
@@ -5295,13 +5465,20 @@ $(document).ready(function() {
 	$("#SaveChanges")[0].disabled = "disabled";
 	$("#ShowMessage")[0].innerHTML = "";
 	$("#ShowMessage")[0].className = "";
+
+	var rackCodeMirror = CodeMirror.fromTextArea(document.getElementById("RCTA"),{
+		mode:'rackcode',
+		lineNumbers:true });
+	rackCodeMirror.on("change",function(cm,cmChangeObject){
+		$("#RCTA").text(cm.getValue());
+    });
 });
 ENDJAVASCRIPT
 	, TRUE);
 
 	$text = loadScript ('RackCode');
 	printOpFormIntro ('saveRackCode');
-	echo '<table border=0 align=center>';
+	echo '<table style="width:100%;border:1px;" border=0 align=center>';
 	echo "<tr><td><textarea rows=40 cols=100 name=rackcode id=RCTA class='codepress rackcode'>";
 	echo $text . "</textarea></td></tr>\n";
 	echo "<tr><td align=center>";
@@ -6019,6 +6196,19 @@ function showPathAndSearch ($pageno, $tabno)
 		$item .= $ancor_tail;
 		$item .= "'>" . $title['name'] . "</a>";
 		$items[] = $item;
+
+		// location bread crumbs insert for Rows and Racks
+		if ($no == 'row')
+		{
+			$trail = getLocationTrail ($title['params']['location_id']);
+			if(!empty ($trail))
+				$items[] = $trail;
+		}
+		if($no == 'location')
+		{
+			// overwrite the bread crumb for current location with whole path
+			$items[count ($items)-1] = getLocationTrail ($title['params']['location_id']);
+		}
 	}
 	// Search form.
 	echo "<div class='searchbox' style='float:right'>";
@@ -6149,14 +6339,14 @@ function dynamic_title_decoder ($path_position)
 			return array
 			(
 				'name' => $rack['row_name'],
-				'params' => array ('row_id' => $rack['row_id'])
+				'params' => array ('row_id' => $rack['row_id'], 'location_id' => $rack['location_id'])
 			);
 		case 'row':
 			$row_info = getRowInfo (assertUIntArg ('row_id'));
 			return array
 			(
 				'name' => $row_info['name'],
-				'params' => array ('row_id' => $row_info['id'])
+				'params' => array ('row_id' => $row_info['id'], 'location_id' => $row_info['location_id'])
 			);
 		default:
 			break;
@@ -8016,7 +8206,7 @@ function renderDiscoveredNeighbors ($object_id)
 					{
 						$tmp_types = ($portinfo['iif_id'] == 1) ?
 							array ($portinfo['oif_id'] => $portinfo['oif_name']) :
-							getExistingPortTypeOptions ($portinfo['id']);
+							getExistingPortTypeOptions ($portinfo);
 						foreach ($tmp_types as $oif_id => $oif_name)
 							$port_types[$side][$oif_id][] = array ('id' => $oif_id, 'name' => $oif_name, 'portinfo' => $portinfo);
 					}
@@ -8309,14 +8499,18 @@ function renderVirtualResourcesSummary ()
 	if (count($clusters) > 0)
 	{
 		echo "<table border=0 cellpadding=5 cellspacing=0 align=center class=cooltable>\n";
-		echo "<tr><th>Cluster</th><th>Hypervisors</th><th>VMs</th></tr>\n";
+		echo "<tr><th>Cluster</th><th>Hypervisors</th><th>Resource Pools</th><th>Cluster VMs</th><th>RP VMs</th><th>Total VMs</th></tr>\n";
 		$order = 'odd';
 		foreach ($clusters as $cluster)
 		{
+			$total_vms = $cluster['cluster_vms'] + $cluster['resource_pool_vms'];
 			echo "<tr class=row_${order} valign=top>";
 			echo '<td class="tdleft">' . mkA ("<strong>${cluster['name']}</strong>", 'object', $cluster['id']) . '</td>';
 			echo "<td class='tdleft'>${cluster['hypervisors']}</td>";
-			echo "<td class='tdleft'>${cluster['VMs']}</td>";
+			echo "<td class='tdleft'>${cluster['resource_pools']}</td>";
+			echo "<td class='tdleft'>${cluster['cluster_vms']}</td>";
+			echo "<td class='tdleft'>${cluster['resource_pool_vms']}</td>";
+			echo "<td class='tdleft'>$total_vms</td>";
 			echo "</tr>\n";
 			$order = $nextorder[$order];
 		}
@@ -8422,6 +8616,8 @@ function switchportInfoJS($object_id)
 			validBreedFunction ($breed, $data['gw'])
 		)
 			$allowed_ops[] = $prefix;
+
+	$allowed_ops[] = 'trace';
 
 	// make JS array with allowed items
 	$list = '';

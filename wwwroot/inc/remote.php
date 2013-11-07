@@ -161,6 +161,7 @@ $linux_sw_ranges = array (
 	1331,1334,
 	1395,1396,
 	1417,1422,
+	1704,1709,
 );
 for ($i = 0; $i + 1 < count ($linux_sw_ranges); $i += 2)
 	for ($j = $linux_sw_ranges[$i]; $j <= $linux_sw_ranges[$i + 1]; $j++)
@@ -386,7 +387,7 @@ function queryTerminal ($object_id, $commands, $tolerate_remote_errors = TRUE)
 		case 'ios12':
 		case 'ftos8':
 			$protocol = 'netcat'; // default is netcat mode
-			$prompt = '^(Login|Username|Password): $|^\S+[>#]$|\[[^][]*\]\? $'; // set the prompt in case user would like to specify telnet protocol
+			$prompt = '^(Login|[Uu]sername|Password): $|^\S+[>#]$|\[[^][]*\]\? $'; // set the prompt in case user would like to specify telnet protocol
 			$commands = "terminal length 0\nterminal no monitor\n" . $commands;
 			break;
 		case 'air12':

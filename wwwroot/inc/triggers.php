@@ -121,10 +121,10 @@ function trigger_natv4 ()
 function trigger_autoports ()
 {
 	$object = spotEntity ('object', getBypassValue());
-	amplifyCell ($object);
-	if (count ($object['ports']))
-		return '';
-	return count (getAutoPorts ($object['objtype_id'])) ? 'attn' : '';
+	if (! getObjectPortCount ($object['id']))
+		if (count (getAutoPorts ($object['objtype_id'])))
+			return 'attn';
+	return '';
 }
 
 function trigger_tags ()

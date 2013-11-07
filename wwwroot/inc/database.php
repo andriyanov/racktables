@@ -819,6 +819,9 @@ function processIPNetVlans (&$cell)
 
 function fetchPortList ($sql_where_clause, $query_params = array())
 {
+	$ret = array(); // indexed by order, not by port_id
+
+	// 1. Fetch ports
 	$query = <<<END
 SELECT
 	Port.id,
@@ -832,48 +835,96 @@ SELECT
 	Port.type AS oif_id,
 	(SELECT PortInnerInterface.iif_name FROM PortInnerInterface WHERE PortInnerInterface.id = Port.iif_id) AS iif_name,
 	(SELECT Dictionary.dict_value FROM Dictionary WHERE Dictionary.dict_key = Port.type) AS oif_name,
-	IF(la.porta, la.cable, lb.cable) AS cableid,
-	IF(la.porta, pa.id, pb.id) AS remote_id,
-	IF(la.porta, pa.name, pb.name) AS remote_name,
-	IF(la.porta, pa.object_id, pb.object_id) AS remote_object_id,
-	IF(la.porta, oa.name, ob.name) AS remote_object_name,
 	(SELECT COUNT(*) FROM PortLog WHERE PortLog.port_id = Port.id) AS log_count,
 	PortLog.user,
-	UNIX_TIMESTAMP(PortLog.date) as time
+	UNIX_TIMESTAMP(PortLog.date) AS time
 FROM
 	Port
 	INNER JOIN Object ON Port.object_id = Object.id
-	LEFT JOIN Link AS la ON la.porta = Port.id
-	LEFT JOIN Port AS pa ON pa.id = la.portb
-	LEFT JOIN Object AS oa ON pa.object_id = oa.id
-	LEFT JOIN Link AS lb on lb.portb = Port.id
-	LEFT JOIN Port AS pb ON pb.id = lb.porta
-	LEFT JOIN Object AS ob ON pb.object_id = ob.id
 	LEFT JOIN PortLog ON PortLog.id = (SELECT id FROM PortLog WHERE PortLog.port_id = Port.id ORDER BY date DESC LIMIT 1)
+WHERE
+	$sql_where_clause
+ORDER BY Port.id
+END;
+	$result = usePreparedSelectBlade ($query, $query_params);
+	while ($row = $result->fetch (PDO::FETCH_ASSOC))
+	{
+		$portinfo = $row;
+		$portinfo['l1_links'] = array();
+		$portinfo['linked'] = 0;
+		$portinfo['l2address'] = l2addressFromDatabase ($row['l2address']);
+		$portinfo['last_log'] = array();
+		if ($row['log_count'])
+		{
+			$portinfo['last_log']['user'] = $row['user'];
+			$portinfo['last_log']['time'] = $row['time'];
+		}
+		unset ($portinfo['user']);
+		unset ($portinfo['time']);
+		$ret[$portinfo['id']] = $portinfo;
+	}
+
+	// 2. Fetch links
+	$query = <<<END
+SELECT
+	Port.id,
+	Link.id AS link_id,
+	Link.cable AS cableid,
+	rp.id AS remote_id,
+	rp.name AS remote_name,
+	rp.iif_id AS remote_iif_id,
+	rp.type AS remote_oif_id,
+	rp.object_id AS remote_object_id,
+	ro.name AS remote_object_name,
+	(Port.iif_id = 0 OR rp.iif_id = 0) AS l1_link
+FROM
+	Port
+	INNER JOIN Object ON Port.object_id = Object.id
+	INNER JOIN Link ON Link.porta = Port.id
+	INNER JOIN Port AS rp ON rp.id = Link.portb
+	INNER JOIN Object AS ro ON rp.object_id = ro.id
+WHERE
+	$sql_where_clause
+UNION SELECT
+	Port.id,
+	Link.id AS link_id,
+	Link.cable AS cableid,
+	rp.id AS remote_id,
+	rp.name AS remote_name,
+	rp.iif_id AS remote_iif_id,
+	rp.type AS remote_oif_id,
+	rp.object_id AS remote_object_id,
+	ro.name AS remote_object_name,
+	(Port.iif_id = 0 OR rp.iif_id = 0) AS l1_link
+FROM
+	Port
+	INNER JOIN Object ON Port.object_id = Object.id
+	INNER JOIN Link ON Link.portb = Port.id
+	INNER JOIN Port AS rp ON rp.id = Link.porta
+	INNER JOIN Object AS ro ON rp.object_id = ro.id
 WHERE
 	$sql_where_clause
 END;
 
-	$result = usePreparedSelectBlade ($query, $query_params);
-	$ret = array();
+	$result = usePreparedSelectBlade ($query, array_merge ($query_params, $query_params));
 	while ($row = $result->fetch (PDO::FETCH_ASSOC))
 	{
-		$row['l2address'] = l2addressFromDatabase ($row['l2address']);
-		$row['linked'] = isset ($row['remote_id']) ? 1 : 0;
-
-		// last changed log
-		$row['last_log'] = array();
-		if ($row['log_count'])
+		if (! isset ($ret[$row['id']]))
+			// assertion failed: fetched Link for Port which was not fetched on stage 1.
+			throw new RackTablesError ("Found link, but did not find port", RackTablesError::INTERNAL);
+		$linkinfo = $row;
+		unset ($linkinfo['l1_link']);
+		unset ($linkinfo['id']);
+		if ($row['l1_link'])
+			$ret[$row['id']]['l1_links'][] = $linkinfo;
+		else
 		{
-			$row['last_log']['user'] = $row['user'];
-			$row['last_log']['time'] = $row['time'];
+			$ret[$row['id']] += $linkinfo;
+			$ret[$row['id']]['linked'] = 1;
 		}
-		unset ($row['user']);
-		unset ($row['time']);
-
-		$ret[] = $row;
 	}
-	return $ret;
+
+	return array_values ($ret); // reindex by order, not by port_id
 }
 
 function getObjectPortsAndLinks ($object_id)
@@ -911,6 +962,41 @@ function checkObjectNameUniqueness ($name, $type_id, $object_id = 0)
 	$row = $result->fetch (PDO::FETCH_NUM);
 	if ($row[0] != 0)
 		throw new InvalidRequestArgException ('name', $name, 'An object with that name already exists');
+}
+
+// Recursive function to create an array containing a chain of related links
+function getNeighborPorts ($port_id, $neighbors = array (), $level = 0)
+{
+	$self = __FUNCTION__;
+	if ($level >= 10)
+		throw new InvalidArgException ('port', $port_id, 'tracing depth too deep - a loop probably exists');
+
+	$query = "
+SELECT L.portb AS port_id, P.name AS port_name, P.object_id, O.name AS object_name 
+FROM Link L 
+LEFT JOIN Port P ON L.portb = P.id 
+LEFT JOIN Object O ON P.object_id = O.id 
+WHERE L.porta = ?
+UNION 
+SELECT L.porta AS port_id, P.name AS port_name, P.object_id, O.name AS object_name  
+FROM Link L 
+LEFT JOIN Port P ON L.porta = P.id 
+LEFT JOIN Object O ON P.object_id = O.id 
+WHERE L.portb = ?";
+	$result = usePreparedSelectBlade ($query, array ($port_id, $port_id));
+	while ($row = $result->fetch (PDO::FETCH_ASSOC))
+	{
+		if (!array_key_exists ($row['port_id'], $neighbors))
+		{
+			$row_port_id = $row['port_id'];
+			$neighbors[$row_port_id]['port_name'] = $row['port_name'];
+			$neighbors[$row_port_id]['object_id'] = intval ($row['object_id']);
+			$neighbors[$row_port_id]['object_name'] = $row['object_name'];
+			$neighbors[$row_port_id]['remote_port_id'] = intval ($port_id);
+			$neighbors = $self ($row_port_id, $neighbors, $level+1);
+		}
+	}
+	return $neighbors;
 }
 
 function commitAddObject ($new_name, $new_label, $new_type_id, $new_asset_no, $taglist = array())
@@ -1115,32 +1201,55 @@ function commitUnlinkEntitiesByLinkID ($link_id)
 	usePreparedDeleteBlade ('EntityLink', array ('id' => $link_id));
 }
 
-// The following functions return stats about VM-related info.
-// TODO: simplify the queries
+// return VM clusters and corresponding stats
+//	- number of hypervisors
+//	- number of resource pools
+//	- number of VMs whose parent is the cluster itself
+//	- number of VMs whose parent is one of the resource pools in the cluster
 function getVMClusterSummary ()
 {
-	$result = usePreparedSelectBlade
-	(
-		"SELECT O.id, O.name, " .
-		"(SELECT COUNT(*) FROM EntityLink EL " .
-		"LEFT JOIN Object O_H ON EL.child_entity_id = O_H.id " .
-		"LEFT JOIN AttributeValue AV ON O_H.id = AV.object_id " .
-		"WHERE EL.parent_entity_type = 'object' " .
-		"AND EL.child_entity_type = 'object' " .
-		"AND EL.parent_entity_id = O.id " .
-		"AND O_H.objtype_id = 4 " .
-		"AND AV.attr_id = 26 " .
-		"AND AV.uint_value = 1501) AS hypervisors, " .
-		"(SELECT COUNT(*) FROM EntityLink EL " .
-		"LEFT JOIN Object O_VM ON EL.child_entity_id = O_VM.id " .
-		"WHERE EL.parent_entity_type = 'object' " .
-		"AND EL.child_entity_type = 'object' " .
-		"AND EL.parent_entity_id = O.id " .
-		"AND O_VM.objtype_id = 1504) AS VMs " .
-		"FROM Object O " .
-		"WHERE O.objtype_id = 1505 " .
-		"ORDER BY O.name"
-	);
+	$query = <<<END
+SELECT
+	O.id,
+	O.name,
+	(SELECT COUNT(*) FROM EntityLink EL
+		LEFT JOIN Object O_H ON EL.child_entity_id = O_H.id
+		LEFT JOIN AttributeValue AV ON O_H.id = AV.object_id
+		WHERE EL.parent_entity_type = 'object'
+		AND EL.child_entity_type = 'object'
+		AND EL.parent_entity_id = O.id
+		AND O_H.objtype_id = 4
+		AND AV.attr_id = 26
+		AND AV.uint_value = 1501) AS hypervisors,
+	(SELECT COUNT(*) FROM EntityLink EL
+		LEFT JOIN Object O_RP ON EL.child_entity_id = O_RP.id
+		WHERE EL.parent_entity_type = 'object'
+		AND EL.child_entity_type = 'object'
+		AND EL.parent_entity_id = O.id
+		AND O_RP.objtype_id = 1506) AS resource_pools,
+	(SELECT COUNT(*) FROM EntityLink EL
+		LEFT JOIN Object O_C_VM ON EL.child_entity_id = O_C_VM.id
+		WHERE EL.parent_entity_type = 'object'
+		AND EL.child_entity_type = 'object'
+		AND EL.parent_entity_id = O.id
+		AND O_C_VM.objtype_id = 1504) AS cluster_vms,
+	(SELECT COUNT(*) FROM EntityLink EL
+		LEFT JOIN Object O_RP_VM ON EL.child_entity_id = O_RP_VM.id
+		WHERE EL.parent_entity_type = 'object'
+		AND EL.child_entity_type = 'object'
+		AND EL.parent_entity_id IN
+			(SELECT child_entity_id FROM EntityLink EL
+				LEFT JOIN Object O_RP ON EL.child_entity_id = O_RP.id
+				WHERE EL.parent_entity_type = 'object'
+				AND EL.child_entity_type = 'object'
+				AND EL.parent_entity_id = O.id
+				AND O_RP.objtype_id = 1506)
+		AND O_RP_VM.objtype_id = 1504) AS resource_pool_vms
+FROM Object O
+WHERE O.objtype_id = 1505
+ORDER BY O.name
+END;
+	$result = usePreparedSelectBlade ($query);
 	return $result->fetchAll (PDO::FETCH_ASSOC);
 }
 
@@ -1616,7 +1725,7 @@ function commitUpdatePort ($object_id, $port_id, $port_name, $port_type_id, $por
 			throw new InvalidRequestArgException ('port_l2address', $db_l2address, 'address belongs to another object');
 		}
 		$prev_comment = getPortReservationComment ($port_id);
-		$reservation_comment = mb_strlen ($port_reservation_comment) ? $port_reservation_comment : NULL;
+		$reservation_comment = nullEmptyStr ($port_reservation_comment);
 		usePreparedUpdateBlade
 		(
 			'Port',
@@ -1699,25 +1808,10 @@ function linkPorts ($porta, $portb, $cable = NULL)
 	if ($porta == $portb)
 		throw new InvalidArgException ('porta/portb', $porta, "Ports can't be the same");
 
-	global $dbxlink;
-	$dbxlink->exec ('LOCK TABLES Link WRITE');
-	$result = usePreparedSelectBlade
-	(
-		'SELECT COUNT(*) FROM Link WHERE porta IN (?,?) OR portb IN (?,?)',
-		array ($porta, $portb, $porta, $portb)
-	);
-	if ($result->fetchColumn () != 0)
-	{
-		$dbxlink->exec ('UNLOCK TABLES');
-		return "Port ${porta} or ${portb} is already linked";
-	}
-	unset ($result);
-	if ($porta > $portb)
-	{
-		$tmp = $porta;
-		$porta = $portb;
-		$portb = $tmp;
-	}
+	// get port types
+	$ports = reindexById (fetchPortList ('Port.id IN (?, ?)', array ($porta, $portb)));
+	$l1_link = (0 == $ports[$porta]['iif_id'] || 0 == $ports[$portb]['iif_id']);
+
 	usePreparedInsertBlade
 	(
 		'Link',
@@ -1728,66 +1822,43 @@ function linkPorts ($porta, $portb, $cable = NULL)
 			'cable' => mb_strlen ($cable) ? $cable : NULL
 		)
 	);
-	$dbxlink->exec ('UNLOCK TABLES');
-	usePreparedExecuteBlade
-	(
-		'UPDATE Port SET reservation_comment=NULL WHERE id IN(?, ?)',
-		array ($porta, $portb)
-	);
+	if (! $l1_link)
+		usePreparedExecuteBlade
+		(
+			'UPDATE Port SET reservation_comment=NULL WHERE id IN(?, ?)',
+			array ($porta, $portb)
+		);
 
 	// log new links
-	$result = usePreparedSelectBlade
-	(
-		"SELECT Port.id, Port.name as port_name, Object.name as obj_name FROM Port " .
-		"INNER JOIN Object ON Port.object_id = Object.id WHERE Port.id IN (?, ?)",
-		array ($porta, $portb)
-	);
-	$rows = $result->fetchAll (PDO::FETCH_ASSOC);
-	unset ($result);
-	foreach ($rows as $row)
+	foreach ($ports as $row)
 	{
 		$pair_id = ($row['id'] == $porta ? $portb : $porta);
-		addPortLogEntry ($pair_id, sprintf ("linked to %s %s", $row['obj_name'], $row['port_name']));
+		addPortLogEntry ($pair_id, sprintf ("linked to %s %s", $row['object_name'], $row['name']));
 	}
 }
 
-function commitUpdatePortLink ($port_id, $cable = NULL)
+function commitUpdatePortLink ($link_id, $cable = NULL)
 {
-	return usePreparedUpdateBlade
+	return usePreparedExecuteBlade
 	(
-		'Link',
-		array ('cable' => mb_strlen ($cable) ? $cable : NULL),
-		array ('porta' => $port_id, 'portb' => $port_id),
-		'OR'
+		'UPDATE Link SET cable = ? WHERE id = ?',
+		array (nullEmptyStr ($cable), $link_id)
 	);
 }
 
-function commitUnlinkPort ($port_id)
+function commitUnlinkPort ($link_id)
 {
 	// fetch and log existing link
-	$result = usePreparedSelectBlade
-	(
-		"SELECT	pa.id AS id_a, pa.name AS port_name_a, oa.name AS obj_name_a, " .
-		"pb.id AS id_b, pb.name AS port_name_b, ob.name AS obj_name_b " .
-		"FROM " .
-		"Link INNER JOIN Port pa ON pa.id = Link.porta " .
-		"INNER JOIN Port pb ON pb.id = Link.portb " .
-		"INNER JOIN RackObject oa ON pa.object_id = oa.id " .
-		"INNER JOIN RackObject ob ON pb.object_id = ob.id " .
-		"WHERE " .
-		"Link.porta = ? OR Link.portb = ?",
-		array ($port_id, $port_id)
-	);
-	$rows = $result->fetchAll (PDO::FETCH_ASSOC);
-	unset ($result);
-	foreach ($rows as $row)
+	$link_info = getPortLinkInfo ($link_id);
+	$ports = reindexById (fetchPortList ('Port.id IN (?, ?)', array ($link_info['porta'], $link_info['portb'])));
+	foreach ($ports as $row)
 	{
-		addPortLogEntry ($row['id_a'], sprintf ("unlinked from %s %s", $row['obj_name_b'], $row['port_name_b']));
-		addPortLogEntry ($row['id_b'], sprintf ("unlinked from %s %s", $row['obj_name_a'], $row['port_name_a']));
+		$pair_id = ($row['id'] == $link_info['porta'] ? $link_info['portb'] : $link_info['porta']);
+		addPortLogEntry ($row['id'], sprintf ("unlinked from %s %s", $ports[$pair_id]['object_name'], $ports[$pair_id]['name']));
 	}
 
 	// remove existing link
-	usePreparedDeleteBlade ('Link', array ('porta' => $port_id, 'portb' => $port_id), 'OR');
+	usePreparedDeleteBlade ('Link', array ('id' => $link_id));
 }
 
 function addPortLogEntry ($port_id, $message)
@@ -2955,22 +3026,26 @@ function getObjectAttrsSearchResults ($what)
 
 // Search stickers and return a list of pairs "object_id-attribute_id",
 // which matched. A partilar object_id could be returned more than once, if it has
-// multiple matching stickers. Search is only performed on "string" attributes.
+// multiple matching stickers. Search is only performed on "string" or "dict" attributes.
 function getStickerSearchResults ($tablename, $what)
 {
 	$result = usePreparedSelectBlade
 	(
-		'SELECT object_id, attr_id FROM AttributeValue AV ' .
+		'SELECT AV.object_id, AV.attr_id FROM AttributeValue AV ' .
 		"INNER JOIN ${tablename} O ON AV.object_id = O.id " .
-		'WHERE string_value LIKE ? ORDER BY object_id',
-		array ("%${what}%")
+		'INNER JOIN Attribute A ON AV.attr_id = A.id ' .
+		'LEFT JOIN AttributeMap AM ON A.type = "dict" AND AV.object_tid = AM.objtype_id AND AV.attr_id = AM.attr_id ' .
+		'LEFT JOIN Dictionary D ON AM.chapter_id = D.chapter_id AND AV.uint_value = D.dict_key ' .
+		'WHERE string_value LIKE ? ' .
+		'OR (A.type = "dict" AND dict_value LIKE ?) ORDER BY object_id',
+		array ("%${what}%", "%${what}%")
 	);
 
 	$map = getAttrMap();
 	$ret = array();
 	while ($row = $result->fetch (PDO::FETCH_ASSOC))
 	{
-		if ($map[$row['attr_id']]['type'] == 'string')
+		if (in_array ($map[$row['attr_id']]['type'], array ('string', 'dict')))
 		{
 			$ret[$row['object_id']]['id'] = $row['object_id'];
 			$ret[$row['object_id']]['by_sticker'][] = $row['attr_id'];
@@ -3209,6 +3284,16 @@ function getPortOIFCompat ($ignore_cache = FALSE)
 	$result = usePreparedSelectBlade ($query);
 	$cache = $result->fetchAll (PDO::FETCH_ASSOC);
 	return $cache;
+}
+
+function addPortOIFCompat ($type1, $type2)
+{
+	return usePreparedExecuteBlade ("INSERT IGNORE INTO PortCompat (type1, type2) VALUES (?, ?),(?, ?)", array ($type1, $type2, $type2, $type1));
+}
+
+function deletePortOIFCompat ($type1, $type2)
+{
+	return usePreparedExecuteBlade ("DELETE FROM PortCompat WHERE (type1 = ? AND type2 = ?) OR (type1 = ? AND type2 = ?)", array ($type1, $type2, $type2, $type1));
 }
 
 // Returns an array of all object type pairs from the ObjectParentCompat table.
@@ -3652,8 +3737,6 @@ function convertPDOException ($e)
 	switch ($e->getCode() . '-' . $e->errorInfo[1])
 	{
 	case '23000-1062':
-		$text = 'such record already exists';
-		break;
 	case '23000-1205':
 		$text = 'such record already exists';
 		break;
@@ -4202,13 +4285,13 @@ function saveScript ($name = '', $text)
 function newPortForwarding ($object_id, $localip_bin, $localport, $remoteip_bin, $remoteport, $proto, $description)
 {
 	if (NULL === getIPv4AddressNetworkId ($localip_bin))
-		throw new InvalidArgException ('localip_bin', $localip_bin, "Non-existant ip");
+		throw new InvalidRequestArgException ('localip_bin', $localip_bin, 'Non-existent ip');
 	if (NULL === getIPv4AddressNetworkId ($remoteip_bin))
-		throw new InvalidArgException ('remoteip_bin', $remoteip_bin, "Non-existant ip");
+		throw new InvalidRequestArgException ('remoteip_bin', $remoteip_bin, 'Non-existent ip');
 	if ( ($localport <= 0) or ($localport >= 65536) )
-		throw new InvalidArgException ('localport', $localport, "invaild port");
+		throw new InvalidRequestArgException ('localport', $localport, 'Invaild port');
 	if ( ($remoteport <= 0) or ($remoteport >= 65536) )
-		throw new InvalidArgException ('remoteport', $remoteport, "invaild port");
+		throw new InvalidRequestArgException ('remoteport', $remoteport, 'Invaild port');
 
 	return usePreparedInsertBlade
 	(
@@ -4654,37 +4737,53 @@ function getPortInterfaceCompat()
 
 // Return a set of options for a plain SELECT. These options include the current
 // OIF of the given port and all OIFs of its permanent IIF.
-// If given port is already linked, returns only types compatible with the remote port's type
-function getExistingPortTypeOptions ($port_id)
+// If given port is already linked, return only types compatible with the remote port(s)' type(s)
+function getExistingPortTypeOptions ($portinfo)
 {
-	$portinfo = getPortInfo ($port_id);
-	$remote_type = NULL;
+	$ret = array(); // key: oif_id, value: oif_name
+	$links = $portinfo['l1_links'];
 	if ($portinfo['linked'])
+		$links[] = $portinfo;
+	if ($links)
 	{
-		$remote_portinfo = getPortInfo ($portinfo['remote_id']);
-		$result = usePreparedSelectBlade ("
-SELECT DISTINCT oif_id, dict_value AS oif_name
-FROM PortInterfaceCompat INNER JOIN Dictionary ON oif_id = dict_key
-LEFT JOIN PortCompat pc1 ON oif_id = pc1.type1 AND pc1.type2 = ?
-LEFT JOIN PortCompat pc2 ON oif_id = pc1.type2 AND pc2.type1 = ?
-WHERE iif_id = (SELECT iif_id FROM Port WHERE id = ?)
-AND (pc1.type1 IS NOT NULL OR pc2.type2 IS NOT NULL)
-ORDER BY oif_name
-", array ($remote_portinfo['oif_id'], $remote_portinfo['oif_id'], $port_id)
-		);
+		foreach ($links as $linkinfo)
+		{
+			$result = usePreparedSelectBlade
+			(
+				'SELECT DISTINCT oif_id, dict_value AS oif_name ' .
+				'FROM PortInterfaceCompat INNER JOIN Dictionary ON oif_id = dict_key ' .
+				'INNER JOIN PortCompat pc ON oif_id = pc.type1 AND pc.type2 = ? ' .
+				'WHERE iif_id = ? ' .
+				'ORDER BY oif_name',
+				array ($linkinfo['remote_oif_id'], $portinfo['iif_id'])
+			);
+			while ($row = $result->fetch (PDO::FETCH_ASSOC))
+			{
+				$ret[$row['oif_id']]['oif_name'] = $row['oif_name'];
+				$ret[$row['oif_id']]['oif_id'] = $row['oif_id'];
+				$ret[$row['oif_id']]['count'] = isset ($ret[$row['oif_id']]['count']) ? $ret[$row['oif_id']]['count'] + 1 : 1;
+			}
+		}
+		foreach ($ret as $oif_id => $row)
+			if ($row['count'] < count ($links))
+				unset ($ret[$oif_id]);
 	}
 	else
 	{
-		$result = usePreparedSelectBlade ("
-SELECT oif_id, dict_value AS oif_name
-FROM PortInterfaceCompat INNER JOIN Dictionary ON oif_id = dict_key
-WHERE iif_id = (SELECT iif_id FROM Port WHERE id = ?)
-ORDER BY oif_name
-", array ($port_id)
+		$result = usePreparedSelectBlade
+		(
+			'SELECT oif_id, dict_value AS oif_name ' .
+			'FROM PortInterfaceCompat INNER JOIN Dictionary ON oif_id = dict_key ' .
+			'WHERE iif_id = (SELECT iif_id FROM Port WHERE id = ?) ' .
+			'ORDER BY oif_name',
+			array ($portinfo['id'])
 		);
+		$ret = $result->fetchAll (PDO::FETCH_ASSOC);
 	}
-
-	return reduceSubarraysToColumn (reindexByID ($result->fetchAll (PDO::FETCH_ASSOC), 'oif_id'), 'oif_name');
+	$ret = reduceSubarraysToColumn (reindexByID ($ret, 'oif_id'), 'oif_name');
+	if (! count ($ret))
+		$ret[$portinfo['oif_id']] = $portinfo['oif_name'];
+	return $ret;
 }
 
 function getPortTypeUsageStatistics()
@@ -4732,7 +4831,18 @@ function getPortIIFStats ($args)
 function getPortInfo ($port_id)
 {
 	$result = fetchPortList ('Port.id = ?', array ($port_id));
-	return empty ($result) ? NULL : $result[0];
+	if (empty ($result))
+		throw new EntityNotFoundException ('port', $port_id);
+	return array_first ($result);
+}
+
+function getPortLinkInfo ($link_id)
+{
+	$result = usePreparedSelectBlade ('SELECT id, porta, portb, cable FROM Link WHERE id = ?', array ($link_id));
+	$row = $result->fetch (PDO::FETCH_ASSOC);
+	if (! $row)
+		throw new EntityNotFoundException ('link', $link_id);
+	return $row;
 }
 
 function getVLANDomainStats ()
@@ -5325,6 +5435,12 @@ function isTransactionActive()
 	{
 		return TRUE;
 	}
+}
+
+function getObjectPortCount ($object_id)
+{
+	$result = usePreparedSelectBlade ("SELECT COUNT(*) FROM Port WHERE object_id = ?", array ($object_id));
+	return $result->fetch (PDO::FETCH_COLUMN, 0);
 }
 
 ?>

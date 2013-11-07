@@ -92,10 +92,6 @@ ENDOFTEXT
 ,
 
 	'0.20.0' => <<<ENDOFTEXT
-WARNING: This release have too many internal changes, some of them were waiting more than a year
-to be released. So this release is considered "BETA" and is recommended only to curiuos users,
-who agree to sacrifice the stability to the progress.
-
 Racks and Rows are now stored in the database as Objects.  The RackObject table
 was renamed to Object.  SQL views were created to ease the migration of custom
 reports and scripts.
@@ -205,6 +201,19 @@ ENDOFTEXT
 ,
 
 	'0.20.6' => <<<ENDOFTEXT
+Database triggers are used for some data consistency measures.  The database user
+account must have the 'TRIGGER' privilege, which was introduced in MySQL 5.1.7.
+
+This release converts PatchPanels' port types into the 8P8C(RJ45). There are many
+changes being performed to the database, so BACKUP THE DATABASE BEFORE UPGRADE, PLEASE.
+
+Cable paths can be traced and displayed in a graphical format. This requires
+the Image_GraphViz PEAR module (http://pear.php.net/package/Image_GraphViz).
+
+The DEFAULT_PORT_IIF_ID config var has changed its syntax. Now it accepts a list
+of port innerInterface IDs separated by semicolon. All the port types contained
+in these IIFs will be displayed in popup selectbox.
+
 Config variables TELNET_OBJS_LISTSRC, SSH_OBJS_LISTSRC, RDP_OBJS_LISTSRC were merged into new MGMT_PROTOS.
 The old ones were deleted from the DB. MGMT_PROTOS allows to specify any management protocol for a particular
 device list by RackCode filter. The default value is 'ssh: {\$typeid_4}, telnet: {\$typeid_8}' which leads to
@@ -212,7 +221,6 @@ object's FQDN linked to 'ssh://server.fqdn' and 'telnet://switch.fqdn'. If the o
 it will be converted to the new syntax and stored into MGMT_PROTOS variable.
 ENDOFTEXT
 ,
-
 );
 
 // At the moment we assume, that for any two releases we can
@@ -1783,6 +1791,129 @@ CREATE TABLE `VSEnabledPorts` (
 			$query[] = "UPDATE Config SET varvalue = '0.20.5' WHERE varname = 'DB_VERSION'";
 			break;
 		case '0.20.6':
+			if (!isInnoDBSupported ())
+			{
+				showUpgradeError ("Cannot upgrade because triggers are not supported by your MySQL server.", __FUNCTION__);
+				die;
+			}
+
+			// create new 'cross' iif and it's connector types
+			$query[] = "INSERT INTO `PortInnerInterface` VALUES (0, 'cross')";
+			$query[] = "INSERT INTO `PortInterfaceCompat` VALUES (0,2076),(0,2077),(0,2078),(0,2079)";
+
+			// convert patch-panels port types into crossed / 8P8C
+			$query[] = "UPDATE Port INNER JOIN Object ON object_id = Object.id AND objtype_id = 9 SET Port.iif_id = 0, Port.type = 2076";
+
+			// prepare Links table (w/o keys)
+			$query[] = "ALTER TABLE `Link`
+				DROP FOREIGN KEY `Link-FK-a`,
+				DROP FOREIGN KEY `Link-FK-b`,
+				DROP PRIMARY KEY,
+				DROP KEY `porta`,
+				DROP KEY `portb`,
+				ADD COLUMN `id` int(10) unsigned NOT NULL PRIMARY KEY AUTO_INCREMENT FIRST,
+				ADD COLUMN `porta_type` int(10) unsigned NOT NULL default '0' AFTER `porta`,
+				ADD COLUMN `portb_type` int(10) unsigned NOT NULL default '0' AFTER `portb`";
+			$query[] = "CREATE TEMPORARY TABLE `Link_tmp_rev` AS (SELECT * FROM `Link` WHERE porta > portb)";
+			$query[] = "UPDATE Link INNER JOIN Link_tmp_rev AS tmp USING (id) SET Link.porta = tmp.portb, Link.portb = tmp.porta";
+			$query[] = "UPDATE Link INNER JOIN Port ON Link.porta = Port.id SET Link.porta_type = Port.type";
+			$query[] = "UPDATE Link INNER JOIN Port ON Link.portb = Port.id SET Link.portb_type = Port.type";
+			$query[] = "DELETE FROM Link WHERE porta = portb";
+
+			// create new PortCompat pairs
+			$copper_oifs = array (2076, 18, 1424, 24, 1087, 1316, 1603, 19, 1604, 1078, 1208, 1077, 682, 681, 29, 1642);
+			$fiber_oifs = array (2077, 2078, 2079, 1206, 1207, 1204, 1205, 1202, 1203, 34, 1198, 1199, 1200, 1195, 1197, 1196, 1201, 1671, 1670, 1669, 35, 36, 37, 39, 30, 38, 1664, 1663, 1668, 1078, 1588, 1084, 1208, 1077, 1080, 1079, 1082, 1081);
+			$pairs = array();
+			foreach (array (2076) as $cross_oif)
+				foreach ($copper_oifs as $oif)
+					$pairs[] = "($cross_oif,$oif)";
+			foreach (array (2077, 2078, 2079) as $cross_oif)
+				foreach ($fiber_oifs as $oif)
+					$pairs[] = "($cross_oif,$oif)";
+			$query[] = "INSERT IGNORE INTO PortCompat VALUES " . implode (',', $pairs);
+			// create used, but missing PortCompat pairs
+			$query[] = "INSERT IGNORE INTO PortCompat SELECT DISTINCT porta_type, portb_type FROM Link";
+			// make PortCompat symmetric (insert missing reversed-order pairs)
+			$query[] = "INSERT INTO PortCompat SELECT pc1.type2, pc1.type1 FROM PortCompat pc1 LEFT JOIN PortCompat pc2 ON pc1.type1 = pc2.type2 AND pc1.type2 = pc2.type1 WHERE pc2.type1 IS NULL";
+
+			// create keys, constraints, triggers for the Links table
+			$query[] = "ALTER TABLE `Port` ADD KEY `Port-FK-id-oif` (`id`,`type`)";
+			$query[] = "ALTER TABLE `Link`
+				ADD UNIQUE KEY `porta-portb-unique` (`porta`,`portb`),
+				ADD KEY `porta` (`porta`,`porta_type`) USING BTREE,
+				ADD KEY `portb` (`portb`,`portb_type`) USING BTREE,
+				ADD KEY `Link-FK-types` (`porta_type`,`portb_type`),
+				ADD CONSTRAINT `Link-FK-types` FOREIGN KEY (`porta_type`, `portb_type`) REFERENCES `PortCompat` (`type1`, `type2`),
+				ADD CONSTRAINT `Link-FK-porta` FOREIGN KEY (`porta`, `porta_type`) REFERENCES `Port` (`id`, `type`) ON DELETE CASCADE ON UPDATE CASCADE,
+				ADD CONSTRAINT `Link-FK-portb` FOREIGN KEY (`portb`, `portb_type`) REFERENCES `Port` (`id`, `type`) ON DELETE CASCADE ON UPDATE CASCADE";
+			$links_trigger_body = <<<ENDOFTRIGGER
+BEGIN
+	DECLARE tmp, porta_iif, porta_type, portb_iif, portb_type, count INTEGER;
+
+	IF NEW.porta = NEW.portb THEN
+		# forbid connecting a port to itself
+		SET NEW.porta = NULL;
+	ELSEIF NEW.porta > NEW.portb THEN
+		# force porta < portb
+		SET tmp = NEW.porta;
+		SET NEW.porta = NEW.portb;
+		SET NEW.portb = tmp;
+		SET tmp = NEW.porta_type;
+		SET NEW.porta_type = NEW.portb_type;
+		SET NEW.portb_type = tmp;
+	END IF;
+
+	# fetch iif_id's of ports, lock ports to prevent concurrent link establishing
+	SELECT iif_id, type INTO porta_iif, porta_type FROM Port WHERE id = NEW.porta FOR UPDATE;
+	SELECT iif_id, type INTO portb_iif, portb_type FROM Port WHERE id = NEW.portb FOR UPDATE;
+
+	# fill not specified default values of porta_type, portb_type
+	IF NEW.porta_type = 0 THEN
+		SET NEW.porta_type = porta_type;
+	END IF;
+	IF NEW.portb_type = 0 THEN
+		SET NEW.portb_type = portb_type;
+	END IF;
+
+	# if both ports are of L2 type, ensure they have no other L2 links
+	IF NEW.porta IS NOT NULL AND porta_iif <> 0 AND portb_iif <> 0 THEN
+		SELECT SUM(s.c) INTO count FROM (
+			SELECT count(*) as c
+				FROM Link l INNER JOIN Port p ON l.portb = p.id AND p.iif_id <> 0
+				WHERE l.porta = NEW.porta AND l.portb <> NEW.portb
+			UNION SELECT count(*) as c
+				FROM Link l INNER JOIN Port p ON l.portb = p.id AND p.iif_id <> 0
+				WHERE l.porta = NEW.portb AND l.portb <> NEW.porta
+			UNION SELECT count(*) as c
+				FROM Link l INNER JOIN Port p ON l.porta = p.id AND p.iif_id <> 0
+				WHERE l.portb = NEW.porta AND l.porta <> NEW.portb
+			UNION SELECT count(*) as c
+				FROM Link l INNER JOIN Port p ON l.porta = p.id AND p.iif_id <> 0
+				WHERE l.portb = NEW.portb AND l.porta <> NEW.porta
+		) s;
+		IF count <> 0 THEN
+			SET NEW.porta = NULL;
+		END IF;
+	END IF;
+END
+ENDOFTRIGGER;
+			$query[] = "CREATE TRIGGER `checkLinkBeforeInsert` BEFORE INSERT ON `Link`
+  FOR EACH ROW $links_trigger_body";
+			$query[] = "CREATE TRIGGER `checkLinkBeforeUpdate` BEFORE UPDATE ON `Link`
+  FOR EACH ROW
+BEGIN
+	IF NEW.porta <> OLD.porta OR NEW.portb <> OLD.portb THEN
+		$links_trigger_body;
+	END IF;
+END";
+			$query[] = "UPDATE `Config` SET varvalue = CONCAT('0;', varvalue), vartype = 'string', description = 'Default port inner interface IDs' WHERE varname = 'DEFAULT_PORT_IIF_ID'";
+			$query[] = "UPDATE `Config` SET varvalue = CONCAT('0=2076; ', varvalue) WHERE varname = 'DEFAULT_PORT_OIF_IDS'";
+			$query[] = "UPDATE `Config` SET varvalue = CONCAT(varvalue, ';9 = 24*0-2076*%u*1') WHERE varname = 'AUTOPORTS_CONFIG'";
+
+			// one HW type was moved from the 'Network switch' chapter to the 'Network chassis' chapter
+			// change the type of affected objects to 'Network chassis'
+			$query[] = "UPDATE `Object` SET objtype_id = 1503 WHERE id IN (SELECT object_id FROM `AttributeValue` WHERE attr_id = 2 and uint_value = 935)";
+
 			// convert values of old 'TELNET_OBJS_LISTSRC' 'SSH_OBJS_LISTSRC', 'RDP_OBJS_LISTSRC' variables into 'MGMT_PROTOS'
 			$query[] = "INSERT INTO `Config` (varname, varvalue, vartype, emptyok, is_hidden, is_userdefined, description) VALUES ('MGMT_PROTOS','ssh: {\$typeid_4}; telnet: {\$typeid_8}','string','yes','no','yes','Mapping of management protocol to devices')";
 			if ('' !== $mgmt_converted_var = convertMgmtConfigVars())
@@ -1962,7 +2093,10 @@ username is "admin". RackTables wiki provides more information on this topic.
 <?php
 
 if (!platform_is_ok())
+{
+	echo '<h1>Please resolve the failed (red) item(s) above.</h1>';
 	die ('</body></html>');
+}
 
 echo '<h1>Upgrade status</h1>';
 $dbver = getDatabaseVersion();
