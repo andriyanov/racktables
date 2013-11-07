@@ -820,6 +820,17 @@ function processIPNetVlans (&$cell)
 function fetchPortList ($sql_where_clause, $query_params = array())
 {
 	$ret = array(); // indexed by order, not by port_id
+	$link_fields = array
+	(
+		'link_id' => NULL,
+		'cableid' => NULL,
+		'remote_id' => NULL,
+		'remote_name' => NULL,
+		'remote_iif_id' => NULL,
+		'remote_oif_id' => NULL,
+		'remote_object_id' => NULL,
+		'remote_object_name' => NULL,
+	);
 
 	// 1. Fetch ports
 	$query = <<<END
@@ -861,6 +872,7 @@ END;
 		}
 		unset ($portinfo['user']);
 		unset ($portinfo['time']);
+		$portinfo += $link_fields;
 		$ret[$portinfo['id']] = $portinfo;
 	}
 
@@ -919,7 +931,7 @@ END;
 			$ret[$row['id']]['l1_links'][] = $linkinfo;
 		else
 		{
-			$ret[$row['id']] += $linkinfo;
+			$ret[$row['id']] = array_merge ($ret[$row['id']], $linkinfo);
 			$ret[$row['id']]['linked'] = 1;
 		}
 	}
