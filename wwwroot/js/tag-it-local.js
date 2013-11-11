@@ -159,7 +159,7 @@ function generateTagList(input, ul, taglist, preselect, value_name) {
 				class_str = "";
 				for (index in tree_styles[level])
 					class_str += ".etag-" + tree_styles[level][index] + " a, ";
-				dynamic_style.append(class_str.slice(0,-2) + " {margin-left:" + width + "px;}");
+				dynamic_style.append(class_str.slice(0,-2) + " {padding-left:" + width + "px !important;}");
 				}
 			results = roots;
 		}
