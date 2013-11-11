@@ -2572,15 +2572,15 @@ function renderIPNewNetForm ()
 	$regexp = addslashes ($regexp);
 	addJS (<<<END
 $(document).ready(function () {
-	$('form#add' input[name="range"]).attr('match', '$regexp');
+	$('form#add input[name="range"]').attr('match', '$regexp');
 	Validate.init();
 });
 END
 	, TRUE);
 
 	startPortlet ('Add new');
-	echo '<table border=0 cellpadding=5 cellspacing=0 align=center>';
 	printOpFormIntro ('add');
+	echo '<table border=0 cellpadding=5 cellspacing=0 align=center>';
 
 	// inputs column
 	$prefix_value = empty ($_REQUEST['set-prefix']) ? '' : $_REQUEST['set-prefix'];
@@ -2595,7 +2595,7 @@ END
 	echo "<tr><td colspan=2>";
 	printImageHREF ('CREATE', 'Add a new network', TRUE, 5);
 	echo '</td></tr>';
-	echo "</form></table><br><br>\n";
+	echo "</table></form><br><br>\n";
 	finishPortlet();
 }
 
