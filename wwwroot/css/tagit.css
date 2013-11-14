@@ -23,8 +23,8 @@ ul.tagit-vertical {
 	margin-left: 2px;
 	margin-right: 2px;
 	overflow: hidden;
-	/* margin-top: 2px; */
-	margin-bottom: 2px;
+	margin-top: 0px;
+	margin-bottom: 0px;
 	padding-left: 1px;
 	background-color: #e8e8e8;
 }
