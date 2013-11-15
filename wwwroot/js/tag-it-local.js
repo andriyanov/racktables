@@ -26,6 +26,113 @@ $(document).ready(function() {
 	});
 });
 
+function getTagChild(tag, tags_trace, tags_name_to_id) {
+	var result = [];
+	if (typeof tag == "undefined" || tag.length == 0) { // empty tag
+		for(var k in tags_trace) {
+			if (tags_trace[k].length == 0)
+				result.push(k);
+		};
+	}
+	else {
+		tag_id = tags_name_to_id[tag];
+		for(var k in tags_trace) {
+			if (tags_trace[k].slice(-1)[0] == tag_id)
+				result.push(k);
+		};
+		//if (result.length == 0)
+		//	result.push("no child");
+	}
+	return result;
+}
+
+function finder (source, req_term) {
+	var term = $.ui.autocomplete.escapeRegex(req_term);
+	var startsWithMatcher = new RegExp("^" + term, "i");
+	var startsWith = $.grep(source, function(value) {
+		return startsWithMatcher.test(value.label || value.value || value);
+	});
+	var containsMatcher = new RegExp(term, "i");
+	var contains = $.grep(source, function (value) {
+		return $.inArray(value, startsWith) < 0 && containsMatcher.test(value.label || value.value || value);
+	});
+	return startsWith.concat(contains);
+}
+
+function suggest_search (term) {
+	var results;
+	if (term == "*") {
+		roots = [];
+		tree_styles = {};
+		tree_styles[0] = [];
+		for (tag in this.options.tags_trace)
+			if (this.options.tags_trace[tag].length == 0) {
+				roots.push(tag);
+				tree_styles[0].push(this.options.tags_name_to_id[tag]);
+			}
+		changes = 1;
+		i = 0;
+		taglist_tmp = $.extend(1, taglist);
+		$(this.options.dynamic_style).appendTo('head');
+		while (changes) {
+			i++;
+			tree_styles[i] = [];
+			changes = 0;
+			for (tag_id in taglist_tmp)
+			{
+				if (taglist_tmp[tag_id]['trace'].length == i)
+				{
+					var tag = this.options.tags_to_name[tag_id];
+					tag_parent_id = this.options.taglist[tag_id]['trace'].slice(-1)[0];
+					tag_parent = this.options.tags_to_name[tag_parent_id];
+					index = roots.indexOf(tag_parent);
+					roots.splice(index + 1, 0, tag);
+					delete taglist_tmp[tag_id];
+					tree_styles[i].push(tag_id);
+					changes = 1;
+				}
+			}
+		}
+		// generate style with indents depended from depth
+		for (level in tree_styles) {
+			if (tree_styles[level].length == 0)
+				continue;
+			width = 1 + level * 15;
+			class_str = "";
+			for (index in tree_styles[level])
+				class_str += ".etag-" + tree_styles[level][index] + " a, ";
+			this.options.dynamic_style.append(class_str.slice(0,-2) + " {padding-left:" + width + "px !important;}");
+			}
+		results = roots;
+	}
+	else if (term.slice(-1) == "/" || term.slice(-1) == "\\") {
+		var term_cutted = term.slice(0, -1);
+		if (term_cutted.length == 0)
+			results = getTagChild(undefined, this.options.tags_trace, this.options.tags_name_to_id);
+		else {
+			var found_tags = finder(this.options.available_tags, term_cutted);
+			if (found_tags.length == 0) {
+				var found_tags = finder(this.options.all_tags, term_cutted);
+			}
+			results = getTagChild(found_tags[0], this.options.tags_trace, this.options.tags_name_to_id);
+		}
+	}
+	else {
+		results = finder(this.options.available_tags, term);
+		if (results.length == 0) {
+			results = finder(this.options.all_tags, term);
+		}
+		results = results.slice(0, suggest_size); // cutting
+	}
+	return results;
+};
+
+function suggest (request, response) {
+	var results = suggest_search.call(this, request.term);
+	response(results);
+	return results;
+};
+
 function generateTagList(input, ul, taglist, preselect, value_name) {
 	var tags_name_to_id = [];
 	var tags_trace = [];
@@ -35,39 +142,19 @@ function generateTagList(input, ul, taglist, preselect, value_name) {
 	var selected = [];
 	var dynamic_style = $('<style>');
 
-	function getTagChild(tag) {
-		result = [];
-		if (tag.length == 0) { // empty tag
-			for(var k in tags_trace) {
-				if (tags_trace[k].length == 0)
-					result.push(k);
-			};
-		}
-		else {
-			tag_id = tags_name_to_id[tag];
-			for(var k in tags_trace) {
-				if (tags_trace[k].slice(-1)[0] == tag_id)
-					result.push(k);
-			};
-			if (result.length == 0)
-				result.push("no child");
-		}
-		return result;
-	}
-
 	function getHelp(tag) {
 		s = [];
-		tag_trace = tags_trace[tag];
+		var tag_trace = tags_trace[tag];
 		for (var k in tag_trace)
 		{
 			s.push(tags_to_name[tag_trace[k]]);
 		}
-		result = s.join(" \u2192 "); // right arrow
+		var result = s.join(" \u2192 "); // right arrow
 		return result;
 	}
 
 	function generateClass(tag) {
-		result = [];
+		var result = [];
 		result.push("tag-" + tags_name_to_id[tag]);
 		result.push("etag-" + tags_name_to_id[tag]);
 		if (typeof tags_trace[tag] != 'undefined')
@@ -78,10 +165,6 @@ function generateTagList(input, ul, taglist, preselect, value_name) {
 			tag_trace = [];
 		$.each(tag_trace, function (index, value) {result.push("tag-" + value);});
 		return result;
-	}
-
-	function addHelpTitle(form, help_text) {
-		form.attr("title", help_text);
 	}
 
 	function afterTagAdded(event, ui) {
@@ -99,128 +182,53 @@ function generateTagList(input, ul, taglist, preselect, value_name) {
 		r.push(getHelp(tag));
 		help_text = $.map(r, function (value, index) {if (value.length > 0) {return value;}});
 		help_text = help_text.join("\n");
-		addHelpTitle(tag_label, help_text);
+		tag_label.attr("title", help_text);
 		//remove tag from available_tags
 		available_tags.splice($.inArray(tag, available_tags), 1);
 		selected.push(tag);
 	}
-
-	function finder(source, req_term) {
-		var term = $.ui.autocomplete.escapeRegex(req_term);
-		var startsWithMatcher = new RegExp("^" + term, "i");
-		var startsWith = $.grep(source, function(value) {
-			return startsWithMatcher.test(value.label || value.value || value);
-		});
-		var containsMatcher = new RegExp(term, "i");
-		var contains = $.grep(source, function (value) {
-			return $.inArray(value, startsWith) < 0 && containsMatcher.test(value.label || value.value || value);
-		});
-		return startsWith.concat(contains);
-	}
-
-	function suggest (request, response) {
-		if (request.term == "*") {
-			roots = [];
-			tree_styles = {};
-			tree_styles[0] = [];
-			for (tag in tags_trace)
-				if (tags_trace[tag].length == 0) {
-					roots.push(tag);
-					tree_styles[0].push(tags_name_to_id[tag]);
-				}
-			changes = 1;
-			i = 0;
-			taglist_tmp = $.extend(1, taglist);
-			$(dynamic_style).appendTo('head');
-			while (changes) {
-				i++;
-				tree_styles[i] = [];
-				changes = 0;
-				for (tag_id in taglist_tmp)
-				{
-					if (taglist_tmp[tag_id]['trace'].length == i)
-					{
-						tag = tags_to_name[tag_id];
-						tag_parent_id = taglist[tag_id]['trace'].slice(-1)[0];
-						tag_parent = tags_to_name[tag_parent_id];
-						index = roots.indexOf(tag_parent);
-						roots.splice(index + 1, 0, tag);
-						delete taglist_tmp[tag_id];
-						tree_styles[i].push(tag_id);
-						changes = 1;
-					}
-				}
-			}
-			// generate style with indents depended from depth
-			for (level in tree_styles) {
-				if (tree_styles[level].length == 0)
-					continue;
-				width = 1 + level * 15;
-				class_str = "";
-				for (index in tree_styles[level])
-					class_str += ".etag-" + tree_styles[level][index] + " a, ";
-				dynamic_style.append(class_str.slice(0,-2) + " {padding-left:" + width + "px !important;}");
-				}
-			results = roots;
-		}
-		else if (request.term.slice(-1) == "/" || request.term.slice(-1) == "\\") {
-			term = request.term.slice(0,-1);
-			if (term.length == 0)
-				results = getTagChild("");
-			else {
-				found_tags = finder(available_tags, term);
-				if (found_tags.length == 0) {
-					found_tags = finder(all_tags, term);
-				}
-				results = getTagChild(found_tags[0]);
-			}
-		}
-		else {
-			results = finder(available_tags, request.term);
-			if (results.length == 0) {
-				results = finder(all_tags, request.term);
-			}
-			results = results.slice(0, suggest_size); // cutting
-		}
-		response(results);
-	};
-
-	function removeClassByPrefix(el, prefix) {
-		var regx = new RegExp('\\b' + prefix + '.*?\\b', 'g');
-		el.className = el.className.replace(regx, '');
-		return el;
-	}
-
-	function generateTagDescription(menu) {
-		suggest_menu = menu['element'][0];
-		for (var i = 0; i < suggest_menu.childElementCount; i++) {
-			tag = suggest_menu.children[i].textContent;
-			tag_trace = tags_trace[tag];
-			help_text = getHelp(tag);
-			form = suggest_menu.children[i];
-			tag_classes = generateClass(tag);
-			if (jQuery.inArray(tag, available_tags) < 0) {
-				if (jQuery.inArray(tag, selected) >= 0)
-					help_text = "already assigned";
-				else
-					help_text = "is not assignable";
-				tag_classes.push("disabled");
-			}
-			addHelpTitle($(form), help_text);
-			$.each(tag_classes, function (index, value) {$(form).addClass(value);});
-		};
-	};
 
 	$.each(taglist, function (index, value) {tags_name_to_id[value['tag']] = index;});
 	$.each(taglist, function (index, value) {tags_trace[value['tag']] = value['trace'];});
 	$.each(taglist, function (index, value) {tags_to_name[index] = value['tag'];});
 	$.each(taglist, function (index, value) {all_tags.push(value['tag']);});
 
-	var oldFn = $.ui.autocomplete.prototype._resizeMenu;
+	var oldresizeMenu = $.ui.autocomplete.prototype._resizeMenu;
 	$.ui.autocomplete.prototype._resizeMenu = function() {
-		oldFn.apply(this, []);
+		oldresizeMenu.call(this);
 		var ul = this.menu.element;
 		ul.children("li:(.ui-menu-item)").addClass("tagit-menu-item");
+	};
+
+	$.ui.autocomplete.prototype._renderItem = function(ul, item) {
+		var li = $('<li>');
+		var a = $('<a>');
+		var tag = item.label;
+		var tag_classes = generateClass(tag);
+		var help_text = getHelp(tag);
+		var m_div = $('<div style="display: inline-block; vertical-align: middle;"></div>');
+		a.prepend(m_div);
+		m_div.prepend($('<div style="float: left;">' + tag + '</div>'));
+		if (jQuery.inArray(tag, available_tags) < 0) {
+			if (jQuery.inArray(tag, selected) >= 0)
+				help_text = "already assigned";
+			else
+				help_text = "is not assignable";
+			tag_classes.push("disabled");
+		}
+		// add title to item
+		a.attr("title", help_text);
+		// add classes to item
+		$.each(tag_classes, function (index, value) {
+			li.addClass(value);
+		});
+		// add icons to item
+		if (jQuery.inArray("disabled", tag_classes) > 0)
+			m_div.append('<span style="float: left;" class="ui-icon ui-icon-locked"></span>');
+		child_count = getTagChild(tag, tags_trace, tags_name_to_id).length;
+		if(child_count > 0)
+			m_div.append('<span style="float: left;" class="ui-icon ui-icon-arrowthick-1-se"></span>');
+		return li.data('item.autocomplete', item).append(a).appendTo(ul);
 	};
 
 	$(ul).tagit({
@@ -244,16 +252,11 @@ function generateTagList(input, ul, taglist, preselect, value_name) {
 							search: function(event, ui) {$(dynamic_style).remove();},
 							open: function(event, ui) {
 								$(this).data("autocomplete").menu.element.addClass("autocomplete-menu");
-								generateTagDescription($(this).data("autocomplete").menu);
+								//generateTagDescription($(this).data("autocomplete").menu);
 								var menu_obj = $(this);
-								var close_menu = function () {
-									menu_obj.data("autocomplete").close();
-								};
 								// escape handler
-								$(document).keydown(function(event) {
-									if (event.keyCode == $.ui.keyCode.ESCAPE) {
-										close_menu(event);
-									}
+								$(document).bind("keydown", function(event, arg) {
+									menu_obj.data("autocomplete").close(event, arg);
 								});
 								$(this).data("autocomplete").close = function (e, ar) {
 									if (e && (e.type == "menuselected" || e.keyCode == $.ui.keyCode.ESCAPE || e.keyCode == $.ui.keyCode.BACKSPACE))
@@ -277,8 +280,17 @@ function generateTagList(input, ul, taglist, preselect, value_name) {
 			available_tags.push(tag);
 			available_tags.sort();
 		},
+		available_tags: available_tags,
+		all_tags: all_tags,
+		tags_trace: tags_trace,
+		tags_to_name: tags_to_name,
+		tags_name_to_id: tags_name_to_id,
+		dynamic_style: dynamic_style,
+		taglist: taglist,
+	});
+	$.each(taglist, function (index, value) {if (typeof value["is_assignable"] == "undefined" || value["is_assignable"] == "yes") available_tags.push(value['tag']);});
+	$.each(preselect, function(index, value) {
+		$(ul).tagit("createTag", value['tag'], false, false, value['user'] + ", " + value['time_parsed']);
 	});
 
-	$.each(taglist, function (index, value) {if (typeof value["is_assignable"] == "undefined" || value["is_assignable"] == "yes") available_tags.push(value['tag']);});
-	$.each(preselect, function(index, value) {$(ul).tagit("createTag", value['tag'], false, false, value['user'] + ", " + value['time_parsed']);});
 }
