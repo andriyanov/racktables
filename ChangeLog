@@ -36,6 +36,8 @@
 	update: exclude some elements when printing to paper (#464)
 	update: add resource pool info to the Virtual Resources cluster portlet (#915)
 	update: use suggest-menu for tag assignment
+	update: cell filter pages display fast if no filters specified
+		(the MAX_UNFILTERED_ENTITIES config variable must be set)
 	new feature: port tracing (#333)
 	new feature: bulk selection and deslection of object rackspace checkboxes by Matthew Kelch
 0.20.5 2013-06-23
